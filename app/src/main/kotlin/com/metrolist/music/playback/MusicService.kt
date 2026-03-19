@@ -227,6 +227,9 @@ class MusicService :
     MediaLibraryService(),
     Player.Listener,
     PlaybackStatsListener.Callback {
+    // --- Karaoke Mode ---
+    val karaokeEngine: KaraokeEngine by lazy { KaraokeEngine(this) }
+    val karaokeRepository: KaraokeRepository by lazy { KaraokeRepository(this) }
     @Inject
     lateinit var database: MusicDatabase
 
@@ -3205,6 +3208,7 @@ class MusicService :
         player.release()
         discordUpdateJob?.cancel()
         super.onDestroy()
+        karaokeEngine.release()
     }
 
     override fun onBind(intent: Intent?) = super.onBind(intent) ?: binder
