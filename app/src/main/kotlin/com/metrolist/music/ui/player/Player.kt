@@ -564,6 +564,137 @@ fun BottomSheetPlayer(
     var vocalVolume by remember { mutableFloatStateOf(1.0f) }
     var karaokeStemsReady by remember { mutableStateOf(false) }
     var karaokeIsProcessing by remember { mutableStateOf(false) }
+    // --- Karaoke Wiring ---
+    // This is the main control loop. It watches isKaraokeActive and fires
+    // whenever the user taps the mic button.
+    // MECHANICAL ANALOGY: This is the PLC (Programmable Logic Controller) —
+    // when the operator flips the switch, it runs the startup sequence.
+    LaunchedEffect(isKaraokeActive, mediaMetadata?.id) {
+        val songId = mediaMetadata?.id
+        android.util.Log.d("KaraokeUI", "LaunchedEffect fired: isKaraokeActive=$isKaraokeActive songId=$songId")
+
+        if (!isKaraokeActive || songId == null) {
+            // Karaoke turned OFF — release the engine
+            android.util.Log.d("KaraokeUI", "Karaoke OFF — releasing engine")
+            playerConnection.karaokeEngine.release()
+            karaokeStemsReady = false
+            karaokeIsProcessing = false
+            return@LaunchedEffect
+        }
+
+        // Karaoke turned ON — start the pipeline
+        karaokeIsProcessing = true
+        karaokeStemsReady = false
+
+        android.util.Log.d("KaraokeUI", "Karaoke ON — starting stem fetch for songId=$songId")
+
+        // Step 1: Find the locally cached audio file for this song
+        // The app caches songs in the ExoPlayer cache — we locate the file
+        val cacheDir = context.cacheDir
+        // Look for any cached file matching this song ID
+        val localAudioFile = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            // Search in common cache locations used by ExoPlayer/Media3
+            val searchDirs = listOf(
+                java.io.File(context.cacheDir, "exoplayer"),
+                java.io.File(context.filesDir, "download"),
+                context.cacheDir
+            )
+            var found: java.io.File? = null
+            for (dir in searchDirs) {
+                if (!dir.exists()) continue
+                found = dir.walkTopDown()
+                    .filter { it.isFile && it.name.contains(songId) }
+                    .firstOrNull()
+                if (found != null) break
+            }
+            android.util.Log.d("KaraokeUI", "Local audio file search result: $found")
+            found
+        }
+
+        if (localAudioFile == null) {
+            android.util.Log.e("KaraokeUI", "No local cache file found for songId=$songId")
+            android.widget.Toast.makeText(
+                context,
+                "Song must be cached for Karaoke Mode. Play it fully once first.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            isKaraokeActive = false
+            karaokeIsProcessing = false
+            return@LaunchedEffect
+        }
+
+        // Step 2: Fetch stems (from cache or backend)
+        android.util.Log.d("KaraokeUI", "Fetching stems for $songId from file ${localAudioFile.path}")
+        val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            playerConnection.karaokeRepository.getStemsForSong(songId, localAudioFile)
+        }
+
+        when (result) {
+            is com.metrolist.music.playback.KaraokeResult.Error -> {
+                android.util.Log.e("KaraokeUI", "Stem fetch failed: ${result.message}")
+                android.widget.Toast.makeText(
+                    context,
+                    "Karaoke unavailable: ${result.message}",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                isKaraokeActive = false
+                karaokeIsProcessing = false
+            }
+
+            is com.metrolist.music.playback.KaraokeResult.Success -> {
+                android.util.Log.d("KaraokeUI", "Stems ready! Loading into KaraokeEngine...")
+
+                // Step 3: Load stems into the dual-player engine
+                val currentPosition = playerConnection.player.currentPosition
+                playerConnection.karaokeEngine.load(
+                    instrumentalFile = result.stems.instrumentalFile,
+                    vocalFile = result.stems.vocalFile,
+                    startPositionMs = currentPosition
+                )
+
+                // Step 4: Set up the state change callback
+                playerConnection.karaokeEngine.onStateChanged = { engineState ->
+                    android.util.Log.d("KaraokeUI", "Engine state: $engineState")
+                    when (engineState) {
+                        com.metrolist.music.playback.KaraokeState.READY -> {
+                            karaokeStemsReady = true
+                            karaokeIsProcessing = false
+                            // Start the karaoke engine in sync with the main player
+                            if (playerConnection.player.isPlaying) {
+                                playerConnection.karaokeEngine.play()
+                            }
+                            android.util.Log.d("KaraokeUI", "KaraokeEngine READY — dual playback active!")
+                        }
+                        com.metrolist.music.playback.KaraokeState.ERROR -> {
+                            karaokeStemsReady = false
+                            karaokeIsProcessing = false
+                            isKaraokeActive = false
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
+    }
+
+    // Wire the vocal volume slider to the engine in real time
+    LaunchedEffect(vocalVolume) {
+        if (karaokeStemsReady) {
+            playerConnection.karaokeEngine.vocalVolume = vocalVolume
+        }
+    }
+
+    // Wire play/pause state — when main player pauses, pause karaoke engine too
+    val isPlayingState by playerConnection.isPlaying.collectAsState()
+    LaunchedEffect(isPlayingState) {
+        if (karaokeStemsReady) {
+            if (isPlayingState) {
+                playerConnection.karaokeEngine.play()
+            } else {
+                playerConnection.karaokeEngine.pause()
+            }
+        }
+    }
     val scope = rememberCoroutineScope()
     var showSleepTimerDialog by remember {
         mutableStateOf(false)
