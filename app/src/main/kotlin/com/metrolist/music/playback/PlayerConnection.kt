@@ -173,6 +173,9 @@ class PlayerConnection(
 
     val error = MutableStateFlow<PlaybackException?>(null)
     val isMuted = service.isMuted
+    // Karaoke engine and repository — direct references to the service instances
+    val karaokeEngine get() = service.karaokeEngine
+    val karaokeRepository get() = service.karaokeRepository
 
     val waitingForNetworkConnection = service.waitingForNetworkConnection
 
