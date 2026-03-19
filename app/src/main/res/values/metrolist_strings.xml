@@ -882,4 +882,7 @@
     <string name="time_transfer_listen_time_label">Listen time: </string>
     <string name="time_transfer_convert">Convert</string>
     <string name="song_dropdown_more_results">Type more to narrow results (%d more)</string>
+    <string name="karaoke_mode">Karaoke Mode</string>
+    <string name="karaoke_processing">Processing…</string>
+    <string name="karaoke_vocal_level">Vocal Level</string>
 </resources>
