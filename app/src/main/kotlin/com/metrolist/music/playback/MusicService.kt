@@ -314,6 +314,10 @@ class MusicService :
                                         karaokeState.value = "ready"
                                         try {
                                             if (player.isPlaying) karaokeEngine.play()
+                                            // Fade out the original track over 1.5 seconds
+                                        scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                            fadePlayerVolume(from = 1f, to = 0f, durationMs = 1500)
+                                        }
                                         } catch (e: Exception) {
                                             android.util.Log.e("MusicService", "Error starting karaoke playback: ${e.message}")
                                         }
@@ -383,6 +387,32 @@ class MusicService :
         karaokeEngine.release()
         karaokeState.value = "idle"
         android.util.Log.d("MusicService", "Karaoke stopped")
+        // Fade the original track back in over 1.5 seconds
+        scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            fadePlayerVolume(from = 0f, to = 1f, durationMs = 1500)
+        }
+    }
+
+    /**
+     * Smoothly fades the main player volume between two values.
+     * MECHANICAL ANALOGY: Like slowly opening or closing the main flow valve.
+     * Must be called from Main thread or wrapped in Dispatchers.Main.
+     */
+    private suspend fun fadePlayerVolume(from: Float, to: Float, durationMs: Long) {
+        val steps = 30
+        val stepTime = durationMs / steps
+        for (i in 0..steps) {
+            val progress = i / steps.toFloat()
+            val volume = from + (to - from) * progress
+            try {
+                player.volume = volume
+            } catch (e: Exception) {
+                break
+            }
+            kotlinx.coroutines.delay(stepTime)
+        }
+        try { player.volume = to } catch (e: Exception) {}
+        android.util.Log.d("MusicService", "Fade complete: volume=$to")
     }
     @Inject
     lateinit var database: MusicDatabase
