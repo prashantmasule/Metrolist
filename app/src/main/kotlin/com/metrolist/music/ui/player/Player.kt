@@ -580,27 +580,15 @@ fun BottomSheetPlayer(
     // Observe karaoke state from the service (survives app switching)
 
     // React to service state changes
+    // React to service state changes — no manual assignment needed
+    // since karaokeStemsReady and karaokeIsProcessing are now derived from karaokeServiceState
     LaunchedEffect(karaokeServiceState) {
         android.util.Log.d("KaraokeUI", "Service karaoke state: $karaokeServiceState")
         when {
-            karaokeServiceState == "ready" -> {
-                karaokeStemsReady = true
-                karaokeIsProcessing = false
-            }
-            karaokeServiceState == "idle" -> {
-                karaokeStemsReady = false
-                karaokeIsProcessing = false
-            }
             karaokeServiceState.startsWith("error:") -> {
                 val message = karaokeServiceState.removePrefix("error:")
                 android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
                 isKaraokeActive = false
-                karaokeStemsReady = false
-                karaokeIsProcessing = false
-            }
-            karaokeServiceState == "processing" -> {
-                karaokeIsProcessing = true
-                karaokeStemsReady = false
             }
         }
     }
@@ -614,8 +602,6 @@ fun BottomSheetPlayer(
             playerConnection.service.startKaraokeProcessing(songId, context)
         } else {
             playerConnection.service.stopKaraoke()
-            karaokeStemsReady = false
-            karaokeIsProcessing = false
         }
     }
 
