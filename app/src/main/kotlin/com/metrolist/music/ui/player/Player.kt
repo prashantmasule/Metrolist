@@ -592,23 +592,72 @@ fun BottomSheetPlayer(
         // The app caches songs in the ExoPlayer cache — we locate the file
         val cacheDir = context.cacheDir
         // Look for any cached file matching this song ID
+
         val localAudioFile = withContext(kotlinx.coroutines.Dispatchers.IO) {
-            // Search in common cache locations used by ExoPlayer/Media3
-            val searchDirs = listOf(
-                java.io.File(context.cacheDir, "exoplayer"),
-                java.io.File(context.filesDir, "download"),
-                context.cacheDir
-            )
-            var found: java.io.File? = null
-            for (dir in searchDirs) {
-                if (!dir.exists()) continue
-                found = dir.walkTopDown()
-                    .filter { it.isFile && it.name.contains(songId) }
-                    .firstOrNull()
-                if (found != null) break
+            android.util.Log.d("KaraokeUI", "Extracting cached audio for songId=$songId")
+
+            // ExoPlayer stores files with hashed names, not songId names.
+            // We extract the cached audio by reading from ExoPlayer's cache
+            // and writing it to a plain temp file the backend can upload.
+            val outputFile = java.io.File(context.cacheDir, "karaoke_input_${songId}.mp3")
+
+            // If we already extracted it before, reuse it
+            if (outputFile.exists() && outputFile.length() > 0) {
+                android.util.Log.d("KaraokeUI", "Reusing previously extracted file: ${outputFile.path}")
+                return@withContext outputFile
             }
-            android.util.Log.d("KaraokeUI", "Local audio file search result: $found")
-            found
+
+            try {
+                // Access ExoPlayer's cache via the service
+                val playerCache = playerConnection.service.playerCache
+                val downloadCache = playerConnection.service.downloadCache
+
+                // The stream URL key used by ExoPlayer cache is the song's stream URL
+                // Try to find any cached span for this song in both caches
+                val cacheKeys = playerCache.keys + downloadCache.keys
+                android.util.Log.d("KaraokeUI", "Cache keys count: ${cacheKeys.size}")
+
+                // Find the key that matches our songId
+                val matchingKey = cacheKeys.firstOrNull { key ->
+                    key.contains(songId)
+                }
+                android.util.Log.d("KaraokeUI", "Matching cache key: $matchingKey")
+
+                if (matchingKey == null) {
+                    android.util.Log.e("KaraokeUI", "No cache key found for songId=$songId")
+                    return@withContext null
+                }
+
+                // Get cached spans for this key
+                val cache = if (playerCache.keys.contains(matchingKey)) playerCache else downloadCache
+                val cachedSpans = cache.getCachedSpans(matchingKey)
+                android.util.Log.d("KaraokeUI", "Cached spans: ${cachedSpans.size}")
+
+                if (cachedSpans.isEmpty()) {
+                    android.util.Log.e("KaraokeUI", "No cached spans found for key=$matchingKey")
+                    return@withContext null
+                }
+
+                // Write all spans sequentially into one output file
+                java.io.FileOutputStream(outputFile).use { out ->
+                    cachedSpans.sortedBy { it.position }.forEach { span ->
+                        span.file?.let { spanFile ->
+                            android.util.Log.d("KaraokeUI", "Writing span: pos=${span.position} len=${span.length} file=${spanFile.path}")
+                            spanFile.inputStream().use { input ->
+                                input.copyTo(out)
+                            }
+                        }
+                    }
+                }
+
+                android.util.Log.d("KaraokeUI", "Extracted file size: ${outputFile.length()} bytes")
+
+                if (outputFile.length() > 0) outputFile else null
+
+            } catch (e: Exception) {
+                android.util.Log.e("KaraokeUI", "Cache extraction failed: ${e.message}", e)
+                null
+            }
         }
 
         if (localAudioFile == null) {
