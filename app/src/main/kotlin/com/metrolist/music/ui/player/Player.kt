@@ -639,7 +639,6 @@ fun BottomSheetPlayer(
     }
 
     // Wire play/pause state — when main player pauses, pause karaoke engine too
-    val isPlayingState by playerConnection.isPlaying.collectAsState()
     LaunchedEffect(isPlayingState) {
         if (karaokeStemsReady) {
             if (isPlayingState) {
