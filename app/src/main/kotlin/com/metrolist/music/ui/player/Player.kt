@@ -565,6 +565,15 @@ fun BottomSheetPlayer(
     var isKaraokeActive by remember { 
         mutableStateOf(playerConnection.service.karaokeState.value != "idle") 
     }
+    // Apply player volume immediately on composition to prevent audio blip
+    // This fires synchronously before the first frame renders
+    val karaokePlayerMuted by playerConnection.service.karaokePlayerMuted.collectAsState()
+    LaunchedEffect(karaokePlayerMuted) {
+        if (karaokePlayerMuted) {
+            // Ensure player stays muted if karaoke is active
+            try { playerConnection.player.volume = 0f } catch (e: Exception) {}
+        }
+    }
     var vocalVolume by remember { mutableFloatStateOf(playerConnection.service.karaokeVocalVolume.value) }
     val karaokeStemsReady by remember {
         derivedStateOf { karaokeServiceState == "ready" }
