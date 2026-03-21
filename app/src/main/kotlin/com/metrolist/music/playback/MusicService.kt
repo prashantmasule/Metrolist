@@ -240,7 +240,9 @@ class MusicService :
         karaokeState.value = "processing"
         android.util.Log.d("MusicService", "startKaraokeProcessing for songId=$songId")
 
-        karaokeJob = scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        karaokeJob = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()
+        ).launch {
             try {
                 // Extract from ExoPlayer cache
                 val outputFile = java.io.File(context.cacheDir, "karaoke_input_${songId}.mp3")
