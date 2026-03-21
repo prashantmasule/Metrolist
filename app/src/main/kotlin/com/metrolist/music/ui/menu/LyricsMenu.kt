@@ -5,6 +5,13 @@
 
 package com.metrolist.music.ui.menu
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.material3.Slider
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.foundation.layout.fillMaxWidth
 import android.app.SearchManager
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -93,6 +100,13 @@ fun LyricsMenu(
     mediaMetadataProvider: () -> MediaMetadata,
     onDismiss: () -> Unit,
     onShowOffsetDialog: () -> Unit = {},
+    // Karaoke mode parameters
+    isKaraokeActive: Boolean = false,
+    karaokeIsProcessing: Boolean = false,
+    karaokeStemsReady: Boolean = false,
+    vocalVolume: Float = 1.0f,
+    onKaraokeToggle: () -> Unit = {},
+    onVocalVolumeChange: (Float) -> Unit = {},
     viewModel: LyricsMenuViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -537,6 +551,57 @@ fun LyricsMenu(
                                         text = "${if (lyricsOffset >= 0) "+" else ""}${lyricsOffset}ms",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                            ),
+                        )
+                        // Karaoke Mode toggle row
+                        add(
+                            Material3MenuItemData(
+                                title = {
+                                    androidx.compose.foundation.layout.Column {
+                                        Text(stringResource(R.string.karaoke_mode))
+                                        // Vocal slider appears inline when karaoke is active
+                                        AnimatedVisibility(visible = isKaraokeActive && karaokeStemsReady) {
+                                            androidx.compose.foundation.layout.Column(
+                                                modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+                                            ) {
+                                                Text(
+                                                    text = stringResource(R.string.karaoke_vocal_level),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                                Slider(
+                                                    value = vocalVolume,
+                                                    onValueChange = onVocalVolumeChange,
+                                                    valueRange = 0f..1f,
+                                                    modifier = androidx.compose.ui.Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(end = 8.dp),
+                                                )
+                                            }
+                                        }
+                                        // Processing indicator
+                                        AnimatedVisibility(visible = karaokeIsProcessing) {
+                                            Text(
+                                                text = stringResource(R.string.karaoke_processing),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                },
+                                icon = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.mic),
+                                        contentDescription = null,
+                                    )
+                                },
+                                onClick = { onKaraokeToggle() },
+                                trailingContent = {
+                                    Switch(
+                                        checked = isKaraokeActive,
+                                        onCheckedChange = { onKaraokeToggle() },
                                     )
                                 },
                             ),
