@@ -234,6 +234,9 @@ class MusicService :
     val karaokeState = MutableStateFlow<String>("idle") // idle, processing, ready, error
     val karaokeVocalVolume = MutableStateFlow(1.0f)
     private var karaokeJob: kotlinx.coroutines.Job? = null
+        // Tracks whether original player is faded out due to karaoke
+    // This persists across UI rebuilds — the SOURCE OF TRUTH for player volume
+    val karaokePlayerMuted = MutableStateFlow(false)
 
     fun startKaraokeProcessing(songId: String, context: Context) {
         karaokeJob?.cancel()
@@ -360,9 +363,18 @@ class MusicService :
                                     mediaItem: androidx.media3.common.MediaItem?,
                                     reason: Int
                                 ) {
-                                    // Song changed — stop karaoke mode
-                                    android.util.Log.d("MusicService", "Song changed — stopping karaoke")
-                                    stopKaraoke()
+                                    android.util.Log.d("MusicService", "Song changed — force stopping karaoke immediately")
+                                    // Cancel job first to stop any in-progress upload/download
+                                    karaokeJob?.cancel()
+                                    karaokeJob = null
+                                    // Release engine immediately
+                                    karaokeEngine.release()
+                                    // Restore player volume immediately — no fade
+                                    // (song already changed so no blip possible)
+                                    try { player.volume = 1f } catch (e: Exception) {}
+                                    karaokePlayerMuted.value = false
+                                    karaokeState.value = "idle"
+                                    android.util.Log.d("MusicService", "Karaoke force-stopped due to song change")
                                 }
                             })
                         }
@@ -384,12 +396,13 @@ class MusicService :
 
     fun stopKaraoke() {
         karaokeJob?.cancel()
+        karaokeJob = null
         karaokeEngine.release()
         karaokeState.value = "idle"
-        android.util.Log.d("MusicService", "Karaoke stopped")
-        // Fade the original track back in over 1.5 seconds
+        karaokePlayerMuted.value = false
+        android.util.Log.d("MusicService", "Karaoke stopped — fading player back in")
         scope.launch(kotlinx.coroutines.Dispatchers.Main) {
-            fadePlayerVolume(from = 0f, to = 1f, durationMs = 1500)
+            fadePlayerVolume(from = player.volume, to = 1f, durationMs = 1500)
         }
     }
 
@@ -398,7 +411,7 @@ class MusicService :
      * MECHANICAL ANALOGY: Like slowly opening or closing the main flow valve.
      * Must be called from Main thread or wrapped in Dispatchers.Main.
      */
-    private suspend fun fadePlayerVolume(from: Float, to: Float, durationMs: Long) {
+   private suspend fun fadePlayerVolume(from: Float, to: Float, durationMs: Long) {
         val steps = 30
         val stepTime = durationMs / steps
         for (i in 0..steps) {
@@ -411,9 +424,13 @@ class MusicService :
             }
             kotlinx.coroutines.delay(stepTime)
         }
-        try { player.volume = to } catch (e: Exception) {}
-        android.util.Log.d("MusicService", "Fade complete: volume=$to")
-    }
+        try {
+            player.volume = to
+            // Track the muted state so UI rebuilds can restore it immediately
+            karaokePlayerMuted.value = (to == 0f)
+            android.util.Log.d("MusicService", "Fade complete: volume=$to muted=${karaokePlayerMuted.value}")
+        } catch (e: Exception) {}
+   }
     @Inject
     lateinit var database: MusicDatabase
 
@@ -1244,6 +1261,11 @@ class MusicService :
             // Cleanup handled manually in onDestroy/release
         }
         _playerFlow.value = player
+        // Immediately apply karaoke mute state when player changes
+        // This prevents the audio blip on orientation change/app reopen
+        if (karaokePlayerMuted.value) {
+            player.volume = 0f
+        }
         return player
     }
 
