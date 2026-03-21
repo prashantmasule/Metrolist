@@ -240,34 +240,46 @@ class MusicService :
         karaokeState.value = "processing"
         android.util.Log.d("MusicService", "startKaraokeProcessing for songId=$songId")
 
-        karaokeJob = kotlinx.coroutines.CoroutineScope(
-            kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()
-        ).launch {
+        // Use a completely independent scope that nothing else can cancel
+        val jobScope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.Dispatchers.IO + 
+            kotlinx.coroutines.SupervisorJob() +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+                android.util.Log.e("MusicService", "Karaoke coroutine error: ${throwable.message}", throwable)
+                karaokeState.value = "error:${throwable.message}"
+            }
+        )
+
+        karaokeJob = jobScope.launch {
             try {
-                // Extract from ExoPlayer cache
+                android.util.Log.d("MusicService", "Karaoke job started on thread: ${Thread.currentThread().name}")
+
+                // Step 1: Extract audio from ExoPlayer cache
                 val outputFile = java.io.File(context.cacheDir, "karaoke_input_${songId}.mp3")
 
                 if (!outputFile.exists() || outputFile.length() == 0L) {
+                    android.util.Log.d("MusicService", "Extracting from cache...")
+                    
                     val matchingKey = (playerCache.keys + downloadCache.keys)
                         .firstOrNull { it.contains(songId) }
 
-                    android.util.Log.d("MusicService", "Cache key found: $matchingKey")
+                    android.util.Log.d("MusicService", "Cache key: $matchingKey")
 
                     if (matchingKey == null) {
-                        android.util.Log.e("MusicService", "No cache key for songId=$songId")
                         karaokeState.value = "error:Song not cached. Play it fully first."
                         return@launch
                     }
 
                     val cache = if (playerCache.keys.contains(matchingKey)) playerCache else downloadCache
                     val spans = cache.getCachedSpans(matchingKey)
+                    android.util.Log.d("MusicService", "Spans found: ${spans.size}")
 
                     java.io.FileOutputStream(outputFile).use { out ->
                         spans.sortedBy { it.position }.forEach { span ->
                             span.file?.inputStream()?.use { it.copyTo(out) }
                         }
                     }
-                    android.util.Log.d("MusicService", "Extracted file: ${outputFile.length()} bytes")
+                    android.util.Log.d("MusicService", "Extracted: ${outputFile.length()} bytes")
                 }
 
                 if (outputFile.length() == 0L) {
@@ -275,40 +287,56 @@ class MusicService :
                     return@launch
                 }
 
-                // Fetch stems from backend
+                // Step 2: Fetch stems from backend
+                android.util.Log.d("MusicService", "Fetching stems from backend...")
                 val result = karaokeRepository.getStemsForSong(songId, outputFile)
 
                 when (result) {
                     is KaraokeResult.Success -> {
-                        val position = withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            player.currentPosition
+                        android.util.Log.d("MusicService", "Stems ready! Loading engine...")
+                        
+                        // Get player position on Main thread
+                        val position = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            try { player.currentPosition } catch (e: Exception) { 0L }
                         }
-                        karaokeEngine.load(
-                            instrumentalFile = result.stems.instrumentalFile,
-                            vocalFile = result.stems.vocalFile,
-                            startPositionMs = position
-                        )
-                        karaokeEngine.onStateChanged = { state ->
-                            when (state) {
-                                KaraokeState.READY -> {
-                                    karaokeState.value = "ready"
-                                    if (player.isPlaying) karaokeEngine.play()
+
+                        // Load engine on Main thread (ExoPlayer requirement)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            karaokeEngine.load(
+                                instrumentalFile = result.stems.instrumentalFile,
+                                vocalFile = result.stems.vocalFile,
+                                startPositionMs = position
+                            )
+                            karaokeEngine.onStateChanged = { state ->
+                                android.util.Log.d("MusicService", "Engine state changed: $state")
+                                when (state) {
+                                    KaraokeState.READY -> {
+                                        karaokeState.value = "ready"
+                                        try {
+                                            if (player.isPlaying) karaokeEngine.play()
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("MusicService", "Error starting karaoke playback: ${e.message}")
+                                        }
+                                    }
+                                    KaraokeState.ERROR -> {
+                                        karaokeState.value = "error:Playback engine failed"
+                                    }
+                                    else -> {}
                                 }
-                                KaraokeState.ERROR -> {
-                                    karaokeState.value = "error:Playback engine failed"
-                                }
-                                else -> {}
                             }
                         }
                     }
                     is KaraokeResult.Error -> {
-                        android.util.Log.e("MusicService", "Stem fetch error: ${result.message}")
+                        android.util.Log.e("MusicService", "Stem error: ${result.message}")
                         karaokeState.value = "error:${result.message}"
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                android.util.Log.w("MusicService", "Karaoke job was cancelled")
+                // Don't update state on cancellation — it was intentional
             } catch (e: Exception) {
                 android.util.Log.e("MusicService", "Karaoke processing failed: ${e.message}", e)
-                karaokeState.value = "error:${e.message}"
+                karaokeState.value = "error:${e.message ?: "Unknown error"}"
             }
         }
     }
