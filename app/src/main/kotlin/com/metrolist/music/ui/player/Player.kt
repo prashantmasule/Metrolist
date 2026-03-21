@@ -560,17 +560,24 @@ fun BottomSheetPlayer(
     // isKaraokeActive: is the microphone toggle ON or OFF?
     // vocalVolume: position of the vocal slider (0.0 = pure instrumental, 1.0 = full vocals)
     // karaokeStemsReady: are the stem files downloaded and loaded into the engine?
-    var isKaraokeActive by rememberSaveable { mutableStateOf(false) }
-    var vocalVolume by remember { mutableFloatStateOf(1.0f) }
-    var karaokeStemsReady by remember { mutableStateOf(false) }
-    var karaokeIsProcessing by remember { mutableStateOf(false) }
+    // Karaoke state driven entirely by MusicService — survives app switching
+    val karaokeServiceState by playerConnection.service.karaokeState.collectAsState()
+    var isKaraokeActive by remember { 
+        mutableStateOf(playerConnection.service.karaokeState.value != "idle") 
+    }
+    var vocalVolume by remember { mutableFloatStateOf(playerConnection.service.karaokeVocalVolume.value) }
+    val karaokeStemsReady by remember {
+        derivedStateOf { karaokeServiceState == "ready" }
+    }
+    val karaokeIsProcessing by remember {
+        derivedStateOf { karaokeServiceState == "processing" }
+    }
     // --- Karaoke Wiring ---
     // This is the main control loop. It watches isKaraokeActive and fires
     // whenever the user taps the mic button.
     // MECHANICAL ANALOGY: This is the PLC (Programmable Logic Controller) —
     // when the operator flips the switch, it runs the startup sequence.
     // Observe karaoke state from the service (survives app switching)
-    val karaokeServiceState by playerConnection.service.karaokeState.collectAsState()
 
     // React to service state changes
     LaunchedEffect(karaokeServiceState) {
