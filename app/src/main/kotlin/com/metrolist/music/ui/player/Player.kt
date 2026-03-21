@@ -1209,19 +1209,38 @@ fun BottomSheetPlayer(
                                 FilledIconButton(
                                     onClick = {
                                         menuState.show {
-                                            com.metrolist.music.ui.menu.LyricsMenu(
-                                                lyricsProvider = { currentLyrics },
-                                                songProvider = { currentSong?.song },
-                                                mediaMetadataProvider = { mediaMetadata },
-                                                onDismiss = menuState::dismiss,
-                                                onShowOffsetDialog = {
-                                                    bottomSheetPageState.show {
-                                                        ShowOffsetDialog(
-                                                            songProvider = { currentSong?.song },
-                                                        )
-                                                    }
-                                                },
-                                            )
+                                    com.metrolist.music.ui.menu.LyricsMenu(
+                                        lyricsProvider = { currentLyrics },
+                                        songProvider = { currentSong?.song },
+                                        mediaMetadataProvider = { mediaMetadata },
+                                        onDismiss = menuState::dismiss,
+                                        onShowOffsetDialog = {
+                                            bottomSheetPageState.show {
+                                                ShowOffsetDialog(
+                                                    songProvider = { currentSong?.song },
+                                                )
+                                            }
+                                        },
+                                        isKaraokeActive = isKaraokeActive,
+                                        karaokeIsProcessing = karaokeIsProcessing,
+                                        karaokeStemsReady = karaokeStemsReady,
+                                        vocalVolume = vocalVolume,
+                                        onKaraokeToggle = {
+                                            isKaraokeActive = !isKaraokeActive
+                                            if (isKaraokeActive) {
+                                                mediaMetadata?.id?.let { songId ->
+                                                    playerConnection.service.startKaraokeProcessing(songId, context)
+                                                }
+                                            } else {
+                                                playerConnection.service.stopKaraoke()
+                                            }
+                                        },
+                                        onVocalVolumeChange = { newVolume ->
+                                            vocalVolume = newVolume
+                                            playerConnection.service.karaokeVocalVolume.value = newVolume
+                                            playerConnection.karaokeEngine.vocalVolume = newVolume
+                                        },
+                                    )
                                         }
                                     },
                                     shape = favShape,
@@ -1520,95 +1539,7 @@ fun BottomSheetPlayer(
             }
 
             Spacer(Modifier.height(24.dp))
-            // --- Karaoke Mode Controls ---
-            // Only show when NOT in fullscreen lyrics mode
-            AnimatedVisibility(
-                visible = !isFullScreen,
-                enter = fadeIn(),
-                exit = fadeOut(),
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = PlayerHorizontalPadding)
-                        .padding(bottom = 8.dp),
-                ) {
-                    // Row containing the microphone toggle button + processing indicator
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        // The microphone toggle button
-                        FilledIconButton(
-                            onClick = {
-                                if (!karaokeIsProcessing) {
-                                    isKaraokeActive = !isKaraokeActive
-                                    Log.d("KaraokeUI", "Karaoke toggled: isKaraokeActive=$isKaraokeActive")
-                                    if (!isKaraokeActive) {
-                                        // User turned karaoke OFF — reset state
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(50),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = if (isKaraokeActive) textButtonColor
-                                                 else textButtonColor.copy(alpha = 0.3f),
-                                contentColor = iconButtonColor,
-                            ),
-                            modifier = Modifier.size(42.dp),
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.mic),
-                                contentDescription = stringResource(R.string.karaoke_mode),
-                                modifier = Modifier.size(22.dp),
-                            )
-                        }
-
-                        // Show "Processing..." text while stems are being fetched
-                        AnimatedVisibility(visible = karaokeIsProcessing) {
-                            Text(
-                                text = stringResource(R.string.karaoke_processing),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextBackgroundColor.copy(alpha = 0.7f),
-                                modifier = Modifier.padding(start = 8.dp),
-                            )
-                        }
-                    }
-
-                    // The vocal volume slider — only visible when karaoke is active
-                    AnimatedVisibility(visible = isKaraokeActive && karaokeStemsReady) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp),
-                        ) {
-                            // Label showing current vocal level
-                            Text(
-                                text = stringResource(R.string.karaoke_vocal_level),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextBackgroundColor.copy(alpha = 0.7f),
-                            )
-                            Slider(
-                                value = vocalVolume,
-                                onValueChange = { newVolume ->
-                                    vocalVolume = newVolume
-                                    Log.d("KaraokeUI", "Vocal volume changed: $newVolume")
-                                    // This will be wired to KaraokeEngine in Phase 5
-                                },
-                                valueRange = 0f..1f,
-                                colors = PlayerSliderColors.getSliderColors(
-                                    textButtonColor, playerBackground, useDarkTheme
-                                ),
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                            )
-                        }
-                    }
-                }
-            }
-
+        
             AnimatedVisibility(
                 visible = !isFullScreen,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -1927,34 +1858,8 @@ fun BottomSheetPlayer(
                 }
             }
         }
-        // Karaoke vocal slider for OLD player design
-                    AnimatedVisibility(visible = isKaraokeActive && karaokeStemsReady) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = PlayerHorizontalPadding)
-                                .padding(top = 4.dp),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.karaoke_vocal_level),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextBackgroundColor.copy(alpha = 0.7f),
-                            )
-                            Slider(
-                                value = vocalVolume,
-                                onValueChange = { newVolume ->
-                                    vocalVolume = newVolume
-                                    Log.d("KaraokeUI", "Vocal volume: $newVolume")
-                                },
-                                valueRange = 0f..1f,
-                                colors = PlayerSliderColors.getSliderColors(
-                                    textButtonColor, playerBackground, useDarkTheme
-                                ),
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                            )
-                        }
-                    }
+
+    }
 
         when (LocalConfiguration.current.orientation) {
             Configuration.ORIENTATION_LANDSCAPE -> {
