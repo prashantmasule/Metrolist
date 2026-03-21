@@ -569,159 +569,64 @@ fun BottomSheetPlayer(
     // whenever the user taps the mic button.
     // MECHANICAL ANALOGY: This is the PLC (Programmable Logic Controller) —
     // when the operator flips the switch, it runs the startup sequence.
-    LaunchedEffect(isKaraokeActive, mediaMetadata?.id) {
-        val songId = mediaMetadata?.id
-        android.util.Log.d("KaraokeUI", "LaunchedEffect fired: isKaraokeActive=$isKaraokeActive songId=$songId")
+    // Observe karaoke state from the service (survives app switching)
+    val karaokeServiceState by playerConnection.service.karaokeState.collectAsState()
 
-        if (!isKaraokeActive || songId == null) {
-            // Karaoke turned OFF — release the engine
-            android.util.Log.d("KaraokeUI", "Karaoke OFF — releasing engine")
-            playerConnection.karaokeEngine.release()
-            karaokeStemsReady = false
-            karaokeIsProcessing = false
-            return@LaunchedEffect
-        }
-
-        // Karaoke turned ON — start the pipeline
-        karaokeIsProcessing = true
-        karaokeStemsReady = false
-
-        android.util.Log.d("KaraokeUI", "Karaoke ON — starting stem fetch for songId=$songId")
-
-        // Step 1: Find the locally cached audio file for this song
-        // The app caches songs in the ExoPlayer cache — we locate the file
-        val cacheDir = context.cacheDir
-        // Look for any cached file matching this song ID
-
-        val localAudioFile = withContext(kotlinx.coroutines.Dispatchers.IO) {
-            android.util.Log.d("KaraokeUI", "Extracting cached audio for songId=$songId")
-
-            // ExoPlayer stores files with hashed names, not songId names.
-            // We extract the cached audio by reading from ExoPlayer's cache
-            // and writing it to a plain temp file the backend can upload.
-            val outputFile = java.io.File(context.cacheDir, "karaoke_input_${songId}.mp3")
-
-            // If we already extracted it before, reuse it
-            if (outputFile.exists() && outputFile.length() > 0) {
-                android.util.Log.d("KaraokeUI", "Reusing previously extracted file: ${outputFile.path}")
-                return@withContext outputFile
-            }
-
-            try {
-                // Access ExoPlayer's cache via the service
-                val playerCache = playerConnection.service.playerCache
-                val downloadCache = playerConnection.service.downloadCache
-
-                // The stream URL key used by ExoPlayer cache is the song's stream URL
-                // Try to find any cached span for this song in both caches
-                val cacheKeys = playerCache.keys + downloadCache.keys
-                android.util.Log.d("KaraokeUI", "Cache keys count: ${cacheKeys.size}")
-
-                // Find the key that matches our songId
-                val matchingKey = cacheKeys.firstOrNull { key ->
-                    key.contains(songId)
-                }
-                android.util.Log.d("KaraokeUI", "Matching cache key: $matchingKey")
-
-                if (matchingKey == null) {
-                    android.util.Log.e("KaraokeUI", "No cache key found for songId=$songId")
-                    return@withContext null
-                }
-
-                // Get cached spans for this key
-                val cache = if (playerCache.keys.contains(matchingKey)) playerCache else downloadCache
-                val cachedSpans = cache.getCachedSpans(matchingKey)
-                android.util.Log.d("KaraokeUI", "Cached spans: ${cachedSpans.size}")
-
-                if (cachedSpans.isEmpty()) {
-                    android.util.Log.e("KaraokeUI", "No cached spans found for key=$matchingKey")
-                    return@withContext null
-                }
-
-                // Write all spans sequentially into one output file
-                java.io.FileOutputStream(outputFile).use { out ->
-                    cachedSpans.sortedBy { it.position }.forEach { span ->
-                        span.file?.let { spanFile ->
-                            android.util.Log.d("KaraokeUI", "Writing span: pos=${span.position} len=${span.length} file=${spanFile.path}")
-                            spanFile.inputStream().use { input ->
-                                input.copyTo(out)
-                            }
-                        }
-                    }
-                }
-
-                android.util.Log.d("KaraokeUI", "Extracted file size: ${outputFile.length()} bytes")
-
-                if (outputFile.length() > 0) outputFile else null
-
-            } catch (e: Exception) {
-                android.util.Log.e("KaraokeUI", "Cache extraction failed: ${e.message}", e)
-                null
-            }
-        }
-
-        if (localAudioFile == null) {
-            android.util.Log.e("KaraokeUI", "No local cache file found for songId=$songId")
-            android.widget.Toast.makeText(
-                context,
-                "Song must be cached for Karaoke Mode. Play it fully once first.",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-            isKaraokeActive = false
-            karaokeIsProcessing = false
-            return@LaunchedEffect
-        }
-
-        // Step 2: Fetch stems (from cache or backend)
-        android.util.Log.d("KaraokeUI", "Fetching stems for $songId from file ${localAudioFile.path}")
-        val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
-            playerConnection.karaokeRepository.getStemsForSong(songId, localAudioFile)
-        }
-
-        when (result) {
-            is com.metrolist.music.playback.KaraokeResult.Error -> {
-                android.util.Log.e("KaraokeUI", "Stem fetch failed: ${result.message}")
-                android.widget.Toast.makeText(
-                    context,
-                    "Karaoke unavailable: ${result.message}",
-                    android.widget.Toast.LENGTH_LONG
-                ).show()
-                isKaraokeActive = false
+    // React to service state changes
+    LaunchedEffect(karaokeServiceState) {
+        android.util.Log.d("KaraokeUI", "Service karaoke state: $karaokeServiceState")
+        when {
+            karaokeServiceState == "ready" -> {
+                karaokeStemsReady = true
                 karaokeIsProcessing = false
             }
+            karaokeServiceState == "idle" -> {
+                karaokeStemsReady = false
+                karaokeIsProcessing = false
+            }
+            karaokeServiceState.startsWith("error:") -> {
+                val message = karaokeServiceState.removePrefix("error:")
+                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+                isKaraokeActive = false
+                karaokeStemsReady = false
+                karaokeIsProcessing = false
+            }
+            karaokeServiceState == "processing" -> {
+                karaokeIsProcessing = true
+                karaokeStemsReady = false
+            }
+        }
+    }
 
-            is com.metrolist.music.playback.KaraokeResult.Success -> {
-                android.util.Log.d("KaraokeUI", "Stems ready! Loading into KaraokeEngine...")
+    // Trigger processing when mic button is tapped
+    LaunchedEffect(isKaraokeActive, mediaMetadata?.id) {
+        val songId = mediaMetadata?.id ?: return@LaunchedEffect
+        android.util.Log.d("KaraokeUI", "Karaoke toggle: active=$isKaraokeActive songId=$songId")
 
-                // Step 3: Load stems into the dual-player engine
-                val currentPosition = playerConnection.player.currentPosition
-                playerConnection.karaokeEngine.load(
-                    instrumentalFile = result.stems.instrumentalFile,
-                    vocalFile = result.stems.vocalFile,
-                    startPositionMs = currentPosition
-                )
+        if (isKaraokeActive) {
+            playerConnection.service.startKaraokeProcessing(songId, context)
+        } else {
+            playerConnection.service.stopKaraoke()
+            karaokeStemsReady = false
+            karaokeIsProcessing = false
+        }
+    }
 
-                // Step 4: Set up the state change callback
-                playerConnection.karaokeEngine.onStateChanged = { engineState ->
-                    android.util.Log.d("KaraokeUI", "Engine state: $engineState")
-                    when (engineState) {
-                        com.metrolist.music.playback.KaraokeState.READY -> {
-                            karaokeStemsReady = true
-                            karaokeIsProcessing = false
-                            // Start the karaoke engine in sync with the main player
-                            if (playerConnection.player.isPlaying) {
-                                playerConnection.karaokeEngine.play()
-                            }
-                            android.util.Log.d("KaraokeUI", "KaraokeEngine READY — dual playback active!")
-                        }
-                        com.metrolist.music.playback.KaraokeState.ERROR -> {
-                            karaokeStemsReady = false
-                            karaokeIsProcessing = false
-                            isKaraokeActive = false
-                        }
-                        else -> {}
-                    }
-                }
+    // Wire vocal slider to engine
+    LaunchedEffect(vocalVolume) {
+        if (karaokeStemsReady) {
+            playerConnection.karaokeEngine.vocalVolume = vocalVolume
+        }
+    }
+
+    // Wire play/pause to karaoke engine
+    val isPlayingState by playerConnection.isPlaying.collectAsState()
+    LaunchedEffect(isPlayingState) {
+        if (karaokeStemsReady) {
+            if (isPlayingState) {
+                playerConnection.karaokeEngine.play()
+            } else {
+                playerConnection.karaokeEngine.pause()
             }
         }
     }
