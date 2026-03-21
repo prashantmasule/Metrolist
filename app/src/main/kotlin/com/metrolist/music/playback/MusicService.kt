@@ -230,6 +230,93 @@ class MusicService :
     // --- Karaoke Mode ---
     val karaokeEngine: KaraokeEngine by lazy { KaraokeEngine(this) }
     val karaokeRepository: KaraokeRepository by lazy { KaraokeRepository(this) }
+    // Karaoke state that survives UI lifecycle
+    val karaokeState = MutableStateFlow<String>("idle") // idle, processing, ready, error
+    val karaokeVocalVolume = MutableStateFlow(1.0f)
+    private var karaokeJob: kotlinx.coroutines.Job? = null
+
+    fun startKaraokeProcessing(songId: String, context: Context) {
+        karaokeJob?.cancel()
+        karaokeState.value = "processing"
+        android.util.Log.d("MusicService", "startKaraokeProcessing for songId=$songId")
+
+        karaokeJob = scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                // Extract from ExoPlayer cache
+                val outputFile = java.io.File(context.cacheDir, "karaoke_input_${songId}.mp3")
+
+                if (!outputFile.exists() || outputFile.length() == 0L) {
+                    val matchingKey = (playerCache.keys + downloadCache.keys)
+                        .firstOrNull { it.contains(songId) }
+
+                    android.util.Log.d("MusicService", "Cache key found: $matchingKey")
+
+                    if (matchingKey == null) {
+                        android.util.Log.e("MusicService", "No cache key for songId=$songId")
+                        karaokeState.value = "error:Song not cached. Play it fully first."
+                        return@launch
+                    }
+
+                    val cache = if (playerCache.keys.contains(matchingKey)) playerCache else downloadCache
+                    val spans = cache.getCachedSpans(matchingKey)
+
+                    java.io.FileOutputStream(outputFile).use { out ->
+                        spans.sortedBy { it.position }.forEach { span ->
+                            span.file?.inputStream()?.use { it.copyTo(out) }
+                        }
+                    }
+                    android.util.Log.d("MusicService", "Extracted file: ${outputFile.length()} bytes")
+                }
+
+                if (outputFile.length() == 0L) {
+                    karaokeState.value = "error:Could not extract audio. Play song fully first."
+                    return@launch
+                }
+
+                // Fetch stems from backend
+                val result = karaokeRepository.getStemsForSong(songId, outputFile)
+
+                when (result) {
+                    is KaraokeResult.Success -> {
+                        val position = withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            player.currentPosition
+                        }
+                        karaokeEngine.load(
+                            instrumentalFile = result.stems.instrumentalFile,
+                            vocalFile = result.stems.vocalFile,
+                            startPositionMs = position
+                        )
+                        karaokeEngine.onStateChanged = { state ->
+                            when (state) {
+                                KaraokeState.READY -> {
+                                    karaokeState.value = "ready"
+                                    if (player.isPlaying) karaokeEngine.play()
+                                }
+                                KaraokeState.ERROR -> {
+                                    karaokeState.value = "error:Playback engine failed"
+                                }
+                                else -> {}
+                            }
+                        }
+                    }
+                    is KaraokeResult.Error -> {
+                        android.util.Log.e("MusicService", "Stem fetch error: ${result.message}")
+                        karaokeState.value = "error:${result.message}"
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MusicService", "Karaoke processing failed: ${e.message}", e)
+                karaokeState.value = "error:${e.message}"
+            }
+        }
+    }
+
+    fun stopKaraoke() {
+        karaokeJob?.cancel()
+        karaokeEngine.release()
+        karaokeState.value = "idle"
+        android.util.Log.d("MusicService", "Karaoke stopped")
+    }
     @Inject
     lateinit var database: MusicDatabase
 
