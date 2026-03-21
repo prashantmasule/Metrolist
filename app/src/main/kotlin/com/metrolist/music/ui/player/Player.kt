@@ -1859,8 +1859,6 @@ fun BottomSheetPlayer(
             }
         }
 
-    }
-
         when (LocalConfiguration.current.orientation) {
             Configuration.ORIENTATION_LANDSCAPE -> {
                 // Calculate vertical padding like OuterTune
