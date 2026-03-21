@@ -324,6 +324,43 @@ class MusicService :
                                     else -> {}
                                 }
                             }
+                            // Add seek + play/pause sync listener to main player
+                            player.addListener(object : androidx.media3.common.Player.Listener {
+                                override fun onPositionDiscontinuity(
+                                    oldPosition: androidx.media3.common.Player.PositionInfo,
+                                    newPosition: androidx.media3.common.Player.PositionInfo,
+                                    reason: Int
+                                ) {
+                                    // Fires whenever the user seeks
+                                    if (karaokeState.value == "ready") {
+                                        val newPos = newPosition.positionMs
+                                        android.util.Log.d("MusicService", "Seek detected → syncing karaoke to ${newPos}ms")
+                                        karaokeEngine.seekTo(newPos)
+                                    }
+                                }
+
+                                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                                    if (karaokeState.value == "ready") {
+                                        android.util.Log.d("MusicService", "Play state changed: isPlaying=$isPlaying")
+                                        if (isPlaying) {
+                                            karaokeEngine.play()
+                                            // Re-sync position on resume to correct any drift
+                                            karaokeEngine.seekTo(player.currentPosition)
+                                        } else {
+                                            karaokeEngine.pause()
+                                        }
+                                    }
+                                }
+            
+                                override fun onMediaItemTransition(
+                                    mediaItem: androidx.media3.common.MediaItem?,
+                                    reason: Int
+                                ) {
+                                    // Song changed — stop karaoke mode
+                                    android.util.Log.d("MusicService", "Song changed — stopping karaoke")
+                                    stopKaraoke()
+                                }
+                            })
                         }
                     }
                     is KaraokeResult.Error -> {
