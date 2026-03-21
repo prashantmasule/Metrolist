@@ -1548,7 +1548,6 @@ fun BottomSheetPlayer(
                                     Log.d("KaraokeUI", "Karaoke toggled: isKaraokeActive=$isKaraokeActive")
                                     if (!isKaraokeActive) {
                                         // User turned karaoke OFF — reset state
-                                        karaokeStemsReady = false
                                     }
                                 }
                             },
