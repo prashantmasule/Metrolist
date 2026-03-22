@@ -255,14 +255,16 @@ class MusicService :
 
         karaokeJob = jobScope.launch {
             try {
-                android.util.Log.d("MusicService", "Karaoke job started on thread: ${Thread.currentThread().name}")
-
+                val t0 = System.currentTimeMillis()
+                android.util.Log.d("MusicService", "T0: Karaoke job started")
                 // Step 1: Extract audio from ExoPlayer cache
                 val outputFile = java.io.File(context.cacheDir, "karaoke_input_${songId}.mp3")
 
                 if (!outputFile.exists() || outputFile.length() == 0L) {
                     android.util.Log.d("MusicService", "Extracting from cache...")
                     
+                    val t1 = System.currentTimeMillis()
+                android.util.Log.d("MusicService", "T1: Starting cache search. Elapsed: ${t1-t0}ms")
                     val matchingKey = (playerCache.keys + downloadCache.keys)
                         .firstOrNull { it.contains(songId) }
 
@@ -292,6 +294,8 @@ class MusicService :
                     }
                 }
                 android.util.Log.d("MusicService", "Extracted ${bytesWritten} bytes (capped at 5MB)")
+                val t2 = System.currentTimeMillis()
+                android.util.Log.d("MusicService", "T2: Extraction complete. Elapsed: ${t2-t0}ms")
                     android.util.Log.d("MusicService", "Extracted: ${outputFile.length()} bytes")
                 }
 
@@ -302,6 +306,8 @@ class MusicService :
 
                 // Step 2: Fetch stems from backend
                 android.util.Log.d("MusicService", "Fetching stems from backend...")
+                val t3 = System.currentTimeMillis()
+                android.util.Log.d("MusicService", "T3: Starting upload. Elapsed: ${t3-t0}ms")
                 val result = karaokeRepository.getStemsForSong(songId, outputFile)
 
                 when (result) {
