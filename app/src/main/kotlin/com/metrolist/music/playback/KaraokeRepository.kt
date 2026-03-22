@@ -27,7 +27,8 @@ private const val TAG = "KaraokeRepository"
 
 // ⚠️ IMPORTANT: Replace this with your actual Hugging Face Space URL
 // Example: "https://prashantmasule-metrolist-karaoke-api.hf.space"
-private const val BACKEND_BASE_URL = "https://prashantmasule-metrolist-karaoke-api.hf.space"
+private const val BACKEND_BASE_URL = "https://judson-interpterygoid-yvone.ngrok-free.dev"
+// private const val BACKEND_BASE_URL = "https://prashantmasule-metrolist-karaoke-api.hf.space"
 
 /**
  * Holds the two local stem files once they are ready.
