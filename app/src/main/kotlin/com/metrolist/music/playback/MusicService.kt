@@ -277,11 +277,21 @@ class MusicService :
                     val spans = cache.getCachedSpans(matchingKey)
                     android.util.Log.d("MusicService", "Spans found: ${spans.size}")
 
-                    java.io.FileOutputStream(outputFile).use { out ->
-                        spans.sortedBy { it.position }.forEach { span ->
-                            span.file?.inputStream()?.use { it.copyTo(out) }
+                    // Cap at 5MB — enough for Demucs separation, prevents mobile upload abort
+                val maxBytes = 5 * 1024 * 1024L
+                var bytesWritten = 0L
+                java.io.FileOutputStream(outputFile).use { out ->
+                    for (span in spans.sortedBy { it.position }) {
+                        if (bytesWritten >= maxBytes) break
+                        span.file?.inputStream()?.use { input ->
+                            val bytes = input.readBytes()
+                            val toWrite = bytes.take((maxBytes - bytesWritten).toInt()).toByteArray()
+                            out.write(toWrite)
+                            bytesWritten += toWrite.size
                         }
                     }
+                }
+                android.util.Log.d("MusicService", "Extracted ${bytesWritten} bytes (capped at 5MB)")
                     android.util.Log.d("MusicService", "Extracted: ${outputFile.length()} bytes")
                 }
 
