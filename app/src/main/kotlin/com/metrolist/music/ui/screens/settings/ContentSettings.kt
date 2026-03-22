@@ -72,6 +72,7 @@ import com.metrolist.music.constants.ProxyEnabledKey
 import com.metrolist.music.constants.ProxyPasswordKey
 import com.metrolist.music.constants.ProxyTypeKey
 import com.metrolist.music.constants.ProxyUrlKey
+import com.metrolist.music.constants.KaraokeBackendUrlKey
 import com.metrolist.music.constants.ProxyUsernameKey
 import com.metrolist.music.constants.QuickPicks
 import com.metrolist.music.constants.QuickPicksKey
@@ -114,6 +115,11 @@ fun ContentSettings(
     val (proxyEnabled, onProxyEnabledChange) = rememberPreference(key = ProxyEnabledKey, defaultValue = false)
     val (proxyType, onProxyTypeChange) = rememberEnumPreference(key = ProxyTypeKey, defaultValue = Proxy.Type.HTTP)
     val (proxyUrl, onProxyUrlChange) = rememberPreference(key = ProxyUrlKey, defaultValue = "host:port")
+    val (karaokeBackendUrl, onKaraokeBackendUrlChange) = rememberPreference(
+        KaraokeBackendUrlKey,
+        defaultValue = "https://prashantmasule-metrolist-karaoke-api.hf.space"
+    )
+    var showKaraokeUrlDialog by rememberSaveable { mutableStateOf(false) }
     val (proxyUsername, onProxyUsernameChange) = rememberPreference(key = ProxyUsernameKey, defaultValue = "username")
     val (proxyPassword, onProxyPasswordChange) = rememberPreference(key = ProxyPasswordKey, defaultValue = "password")
     val (enableKugou, onEnableKugouChange) = rememberPreference(key = EnableKugouKey, defaultValue = true)
@@ -148,6 +154,38 @@ fun ContentSettings(
         mutableStateOf(false)
     }
 
+    if (showKaraokeUrlDialog) {
+        AlertDialog(
+            onDismissRequest = { showKaraokeUrlDialog = false },
+            icon = {
+                Icon(
+                    painter = painterResource(R.drawable.mic),
+                    contentDescription = null,
+                )
+            },
+            title = { Text(stringResource(R.string.karaoke_backend_url)) },
+            text = {
+                OutlinedTextField(
+                    value = karaokeBackendUrl,
+                    onValueChange = onKaraokeBackendUrlChange,
+                    label = { Text(stringResource(R.string.karaoke_backend_url)) },
+                    placeholder = { Text("https://your-space.hf.space") },
+                    singleLine = true,
+                    modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showKaraokeUrlDialog = false }) {
+                    Text(stringResource(android.R.string.ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showKaraokeUrlDialog = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
     if (showProxyConfigurationDialog) {
         var expandedDropdown by remember { mutableStateOf(false) }
 
@@ -895,6 +933,19 @@ fun ContentSettings(
             )
         )
 
+        Spacer(modifier = Modifier.height(27.dp))
+
+        Material3SettingsGroup(
+            title = stringResource(R.string.karaoke_mode),
+            items = listOf(
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.mic),
+                    title = { Text(stringResource(R.string.karaoke_backend_url)) },
+                    description = { Text(karaokeBackendUrl) },
+                    onClick = { showKaraokeUrlDialog = true }
+                )
+            )
+        )
         Spacer(modifier = Modifier.height(27.dp))
 
         Material3SettingsGroup(
