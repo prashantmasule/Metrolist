@@ -14,6 +14,10 @@
 
 package com.metrolist.music.playback
 
+import com.metrolist.music.constants.KaraokeBackendUrlKey
+import com.metrolist.music.utils.dataStore
+import com.metrolist.music.utils.get
+
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +31,7 @@ private const val TAG = "KaraokeRepository"
 
 // ⚠️ IMPORTANT: Replace this with your actual Hugging Face Space URL
 // Example: "https://prashantmasule-metrolist-karaoke-api.hf.space"
-private const val BACKEND_BASE_URL = "https://judson-interpterygoid-yvone.ngrok-free.dev"
+// private const val BACKEND_BASE_URL = "https://judson-interpterygoid-yvone.ngrok-free.dev"
 // private const val BACKEND_BASE_URL = "https://prashantmasule-metrolist-karaoke-api.hf.space"
 
 /**
@@ -49,6 +53,11 @@ sealed class KaraokeResult {
 }
 
 class KaraokeRepository(private val context: Context) {
+
+    // Read backend URL from DataStore — configurable in settings
+    private val backendUrl: String
+        get() = context.dataStore.get(KaraokeBackendUrlKey)
+            ?: "https://prashantmasule-metrolist-karaoke-api.hf.space"
 
     /**
      * The local warehouse directory.
@@ -165,7 +174,7 @@ class KaraokeRepository(private val context: Context) {
     private fun uploadAndSplit(audioFile: File): SplitResponse {
         Log.d(TAG, "uploadAndSplit() file=${audioFile.name} size=${audioFile.length()} bytes")
 
-        val url = URL("$BACKEND_BASE_URL/split")
+        val url = URL("${backendUrl.trimEnd('/')}/split")
         val boundary = "MetrolistKaraoke_${System.currentTimeMillis()}"
 
         val connection = (url.openConnection() as HttpURLConnection).apply {
