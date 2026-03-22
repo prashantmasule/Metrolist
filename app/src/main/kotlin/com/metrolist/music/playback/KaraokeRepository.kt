@@ -14,6 +14,9 @@
 
 package com.metrolist.music.playback
 
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import androidx.datastore.preferences.core.Preferences
 import com.metrolist.music.constants.KaraokeBackendUrlKey
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
@@ -54,10 +57,11 @@ sealed class KaraokeResult {
 
 class KaraokeRepository(private val context: Context) {
 
-    // Read backend URL from DataStore — configurable in settings
+    // Read backend URL from DataStore synchronously
     private val backendUrl: String
-        get() = context.dataStore.get(KaraokeBackendUrlKey)
-            ?: "https://prashantmasule-metrolist-karaoke-api.hf.space"
+        get() = runBlocking {
+            context.dataStore.data.first()[KaraokeBackendUrlKey]
+        } ?: "https://prashantmasule-metrolist-karaoke-api.hf.space"
 
     /**
      * The local warehouse directory.
