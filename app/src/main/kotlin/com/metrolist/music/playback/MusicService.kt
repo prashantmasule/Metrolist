@@ -227,44 +227,77 @@ class MusicService :
     MediaLibraryService(),
     Player.Listener,
     PlaybackStatsListener.Callback {
-    // --- Karaoke Mode ---
+    /**
+
+    // =========================================================================
+    // KARAOKE MOD START
+    // =========================================================================
+
     val karaokeEngine: KaraokeEngine by lazy { KaraokeEngine(this) }
     val karaokeRepository: KaraokeRepository by lazy { KaraokeRepository(this) }
+
     // Karaoke state that survives UI lifecycle
     val karaokeState = MutableStateFlow<String>("idle") // idle, processing, ready, error
     val karaokeVocalVolume = MutableStateFlow(1.0f)
     private var karaokeJob: kotlinx.coroutines.Job? = null
-        // Tracks whether original player is faded out due to karaoke
+
+    // Tracks whether original player is faded out due to karaoke
     // This persists across UI rebuilds — the SOURCE OF TRUTH for player volume
     val karaokePlayerMuted = MutableStateFlow(false)
 
+    /**
+     * KEY FIX FOR RE-UPLOAD BUG:
+     * Tracks which songId is currently being processed.
+     * If UI rebuilds (orientation change, etc.) and triggers startKaraokeProcessing
+     * again for the same song, we skip it — the job is already running.
+     */
+    private var currentlyProcessingSongId: String? = null
+
     fun startKaraokeProcessing(songId: String, context: Context) {
+        // GUARD: If we're already processing this exact song, don't start again.
+        // This prevents duplicate uploads when UI recomposes (orientation change,
+        // app reopen, etc.) while a job is already in progress.
+        if (currentlyProcessingSongId == songId && karaokeState.value == "processing") {
+            android.util.Log.d("MusicService", "Already processing songId=$songId — skipping duplicate request")
+            return
+        }
+
+        // If processing a DIFFERENT song, cancel the old job first
+        if (currentlyProcessingSongId != null && currentlyProcessingSongId != songId) {
+            android.util.Log.d("MusicService", "Cancelling previous job for $currentlyProcessingSongId, starting new for $songId")
+            karaokeJob?.cancel()
+        }
+
+        currentlyProcessingSongId = songId
         karaokeJob?.cancel()
         karaokeState.value = "processing"
         android.util.Log.d("MusicService", "startKaraokeProcessing for songId=$songId")
 
         // Use a completely independent scope that nothing else can cancel
         val jobScope = kotlinx.coroutines.CoroutineScope(
-            kotlinx.coroutines.Dispatchers.IO + 
+            kotlinx.coroutines.Dispatchers.IO +
             kotlinx.coroutines.SupervisorJob() +
             kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
                 android.util.Log.e("MusicService", "Karaoke coroutine error: ${throwable.message}", throwable)
                 karaokeState.value = "error:${throwable.message}"
+                currentlyProcessingSongId = null
             }
         )
 
         karaokeJob = jobScope.launch {
             try {
                 val t0 = System.currentTimeMillis()
-                android.util.Log.d("MusicService", "T0: Karaoke job started")
+                android.util.Log.d("MusicService", "T0: Karaoke job started for $songId")
+
                 // Step 1: Extract audio from ExoPlayer cache
                 val outputFile = java.io.File(context.cacheDir, "karaoke_input_${songId}.mp3")
 
                 if (!outputFile.exists() || outputFile.length() == 0L) {
                     android.util.Log.d("MusicService", "Extracting from cache...")
-                    
+
                     val t1 = System.currentTimeMillis()
-                android.util.Log.d("MusicService", "T1: Starting cache search. Elapsed: ${t1-t0}ms")
+                    android.util.Log.d("MusicService", "T1: Starting cache search. Elapsed: ${t1-t0}ms")
+
                     val matchingKey = (playerCache.keys + downloadCache.keys)
                         .firstOrNull { it.contains(songId) }
 
@@ -272,6 +305,7 @@ class MusicService :
 
                     if (matchingKey == null) {
                         karaokeState.value = "error:Song not cached. Play it fully first."
+                        currentlyProcessingSongId = null
                         return@launch
                     }
 
@@ -279,42 +313,44 @@ class MusicService :
                     val spans = cache.getCachedSpans(matchingKey)
                     android.util.Log.d("MusicService", "Spans found: ${spans.size}")
 
-                    // Cap at 5MB — enough for Demucs separation, prevents mobile upload abort
-                val maxBytes = 5 * 1024 * 1024L
-                var bytesWritten = 0L
-                java.io.FileOutputStream(outputFile).use { out ->
-                    for (span in spans.sortedBy { it.position }) {
-                        if (bytesWritten >= maxBytes) break
-                        span.file?.inputStream()?.use { input ->
-                            val bytes = input.readBytes()
-                            val toWrite = bytes.take((maxBytes - bytesWritten).toInt()).toByteArray()
-                            out.write(toWrite)
-                            bytesWritten += toWrite.size
+                    // NO SIZE CAP — extract the full audio for complete stem separation.
+                    // Previously we capped at 5MB which caused stems to go silent after
+                    // 1-2 minutes. Now we upload the full file and use chunked streaming
+                    // in KaraokeRepository to handle large files reliably.
+                    val totalSpanBytes = spans.sumOf { it.length }
+                    android.util.Log.d("MusicService", "Total cached audio: ${totalSpanBytes / 1024 / 1024}MB across ${spans.size} spans")
+
+                    java.io.FileOutputStream(outputFile).use { out ->
+                        spans.sortedBy { it.position }.forEach { span ->
+                            span.file?.inputStream()?.use { input ->
+                                input.copyTo(out)
+                            }
                         }
                     }
-                }
-                android.util.Log.d("MusicService", "Extracted ${bytesWritten} bytes (capped at 5MB)")
-                val t2 = System.currentTimeMillis()
-                android.util.Log.d("MusicService", "T2: Extraction complete. Elapsed: ${t2-t0}ms")
-                    android.util.Log.d("MusicService", "Extracted: ${outputFile.length()} bytes")
+
+                    val t2 = System.currentTimeMillis()
+                    android.util.Log.d("MusicService", "T2: Extraction complete. ${outputFile.length() / 1024 / 1024}MB extracted. Elapsed: ${t2-t0}ms")
+                } else {
+                    android.util.Log.d("MusicService", "Reusing previously extracted file: ${outputFile.length() / 1024}KB")
                 }
 
                 if (outputFile.length() == 0L) {
                     karaokeState.value = "error:Could not extract audio. Play song fully first."
+                    currentlyProcessingSongId = null
                     return@launch
                 }
 
                 // Step 2: Fetch stems from backend
-                android.util.Log.d("MusicService", "Fetching stems from backend...")
                 val t3 = System.currentTimeMillis()
-                android.util.Log.d("MusicService", "T3: Starting upload. Elapsed: ${t3-t0}ms")
+                android.util.Log.d("MusicService", "T3: Starting upload. File size: ${outputFile.length() / 1024}KB. Elapsed: ${t3-t0}ms")
+
                 val result = karaokeRepository.getStemsForSong(songId, outputFile)
 
                 when (result) {
                     is KaraokeResult.Success -> {
                         android.util.Log.d("MusicService", "Stems ready! Loading engine...")
-                        
-                        // Get player position on Main thread
+
+                        // Get player position on Main thread (ExoPlayer must be accessed on Main)
                         val position = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                             try { player.currentPosition } catch (e: Exception) { 0L }
                         }
@@ -331,30 +367,32 @@ class MusicService :
                                 when (state) {
                                     KaraokeState.READY -> {
                                         karaokeState.value = "ready"
+                                        currentlyProcessingSongId = null
                                         try {
                                             if (player.isPlaying) karaokeEngine.play()
                                             // Fade out the original track over 1.5 seconds
-                                        scope.launch(kotlinx.coroutines.Dispatchers.Main) {
-                                            fadePlayerVolume(from = 1f, to = 0f, durationMs = 1500)
-                                        }
+                                            scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                                fadePlayerVolume(from = 1f, to = 0f, durationMs = 1500)
+                                            }
                                         } catch (e: Exception) {
                                             android.util.Log.e("MusicService", "Error starting karaoke playback: ${e.message}")
                                         }
                                     }
                                     KaraokeState.ERROR -> {
                                         karaokeState.value = "error:Playback engine failed"
+                                        currentlyProcessingSongId = null
                                     }
                                     else -> {}
                                 }
                             }
-                            // Add seek + play/pause sync listener to main player
+
+                            // Add seek + play/pause + song change sync listener to main player
                             player.addListener(object : androidx.media3.common.Player.Listener {
                                 override fun onPositionDiscontinuity(
                                     oldPosition: androidx.media3.common.Player.PositionInfo,
                                     newPosition: androidx.media3.common.Player.PositionInfo,
                                     reason: Int
                                 ) {
-                                    // Fires whenever the user seeks
                                     if (karaokeState.value == "ready") {
                                         val newPos = newPosition.positionMs
                                         android.util.Log.d("MusicService", "Seek detected → syncing karaoke to ${newPos}ms")
@@ -367,26 +405,25 @@ class MusicService :
                                         android.util.Log.d("MusicService", "Play state changed: isPlaying=$isPlaying")
                                         if (isPlaying) {
                                             karaokeEngine.play()
-                                            // Re-sync position on resume to correct any drift
                                             karaokeEngine.seekTo(player.currentPosition)
                                         } else {
                                             karaokeEngine.pause()
                                         }
                                     }
                                 }
-            
+
                                 override fun onMediaItemTransition(
                                     mediaItem: androidx.media3.common.MediaItem?,
                                     reason: Int
                                 ) {
                                     android.util.Log.d("MusicService", "Song changed — force stopping karaoke immediately")
-                                    // Cancel job first to stop any in-progress upload/download
+                                    // Cancel any in-progress job immediately
                                     karaokeJob?.cancel()
                                     karaokeJob = null
-                                    // Release engine immediately
+                                    currentlyProcessingSongId = null
+                                    // Release engine
                                     karaokeEngine.release()
                                     // Restore player volume immediately — no fade
-                                    // (song already changed so no blip possible)
                                     try { player.volume = 1f } catch (e: Exception) {}
                                     karaokePlayerMuted.value = false
                                     karaokeState.value = "idle"
@@ -398,14 +435,17 @@ class MusicService :
                     is KaraokeResult.Error -> {
                         android.util.Log.e("MusicService", "Stem error: ${result.message}")
                         karaokeState.value = "error:${result.message}"
+                        currentlyProcessingSongId = null
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 android.util.Log.w("MusicService", "Karaoke job was cancelled")
+                currentlyProcessingSongId = null
                 // Don't update state on cancellation — it was intentional
             } catch (e: Exception) {
                 android.util.Log.e("MusicService", "Karaoke processing failed: ${e.message}", e)
                 karaokeState.value = "error:${e.message ?: "Unknown error"}"
+                currentlyProcessingSongId = null
             }
         }
     }
@@ -413,6 +453,7 @@ class MusicService :
     fun stopKaraoke() {
         karaokeJob?.cancel()
         karaokeJob = null
+        currentlyProcessingSongId = null
         karaokeEngine.release()
         karaokeState.value = "idle"
         karaokePlayerMuted.value = false
@@ -427,7 +468,7 @@ class MusicService :
      * MECHANICAL ANALOGY: Like slowly opening or closing the main flow valve.
      * Must be called from Main thread or wrapped in Dispatchers.Main.
      */
-   private suspend fun fadePlayerVolume(from: Float, to: Float, durationMs: Long) {
+    private suspend fun fadePlayerVolume(from: Float, to: Float, durationMs: Long) {
         val steps = 30
         val stepTime = durationMs / steps
         for (i in 0..steps) {
@@ -446,7 +487,12 @@ class MusicService :
             karaokePlayerMuted.value = (to == 0f)
             android.util.Log.d("MusicService", "Fade complete: volume=$to muted=${karaokePlayerMuted.value}")
         } catch (e: Exception) {}
-   }
+    }
+
+    // =========================================================================
+    // KARAOKE MOD END
+    // =========================================================================
+
     @Inject
     lateinit var database: MusicDatabase
 
