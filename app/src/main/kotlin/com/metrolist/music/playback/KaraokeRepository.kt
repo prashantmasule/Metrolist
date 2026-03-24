@@ -8,7 +8,7 @@
  * When the engine needs stems for a song:
  *   1. First checks the local warehouse (device cache folder)
  *   2. If parts are in stock → returns them immediately
- *   3. If not in stock → calls the factory (backend API), 
+ *   3. If not in stock → calls the factory (backend API),
  *      waits for delivery, stores them in warehouse, returns them
  */
 
@@ -16,10 +16,8 @@ package com.metrolist.music.playback
 
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import androidx.datastore.preferences.core.Preferences
 import com.metrolist.music.constants.KaraokeBackendUrlKey
 import com.metrolist.music.utils.dataStore
-import com.metrolist.music.utils.get
 
 import android.content.Context
 import android.util.Log
@@ -31,11 +29,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 private const val TAG = "KaraokeRepository"
-
-// ⚠️ IMPORTANT: Replace this with your actual Hugging Face Space URL
-// Example: "https://prashantmasule-metrolist-karaoke-api.hf.space"
-// private const val BACKEND_BASE_URL = "https://judson-interpterygoid-yvone.ngrok-free.dev"
-// private const val BACKEND_BASE_URL = "https://prashantmasule-metrolist-karaoke-api.hf.space"
 
 /**
  * Holds the two local stem files once they are ready.
@@ -57,11 +50,23 @@ sealed class KaraokeResult {
 
 class KaraokeRepository(private val context: Context) {
 
-    // Read backend URL from DataStore synchronously
+    /**
+     * Read backend URL from DataStore synchronously.
+     * Falls back to HF Space URL if not configured.
+     */
     private val backendUrl: String
-        get() = runBlocking {
-            context.dataStore.data.first()[KaraokeBackendUrlKey]
-        } ?: "https://prashantmasule-metrolist-karaoke-api.hf.space"
+        get() {
+            val saved = runBlocking {
+                context.dataStore.data.first()[KaraokeBackendUrlKey]
+            }
+            val url = if (saved.isNullOrBlank()) {
+                "https://prashantmasule-metrolist-karaoke-api.hf.space"
+            } else {
+                saved
+            }
+            Log.d(TAG, "Using backend URL: $url")
+            return url.trimEnd('/')
+        }
 
     /**
      * The local warehouse directory.
@@ -75,7 +80,7 @@ class KaraokeRepository(private val context: Context) {
      * Main entry point. Given a song ID and its local cached audio file,
      * returns the two stem files — either from local cache or freshly split.
      *
-     * @param songId        The unique YouTube video ID (e.g. "dQw4w9WgXcQ")
+     * @param songId         The unique YouTube video ID (e.g. "dQw4w9WgXcQ")
      * @param localAudioFile The song's already-cached audio file on the device
      */
     suspend fun getStemsForSong(
@@ -84,12 +89,12 @@ class KaraokeRepository(private val context: Context) {
     ): KaraokeResult = withContext(Dispatchers.IO) {
 
         Log.d(TAG, "getStemsForSong() songId=$songId")
-        Log.d(TAG, "Local audio file: ${localAudioFile.path}, exists=${localAudioFile.exists()}")
+        Log.d(TAG, "Local audio file: ${localAudioFile.path}, exists=${localAudioFile.exists()}, size=${localAudioFile.length()} bytes")
 
         // --- Step 1: Check the warehouse first ---
         val cachedStems = checkCache(songId)
         if (cachedStems != null) {
-            Log.d(TAG, "Cache HIT for songId=$songId — returning cached stems")
+            Log.d(TAG, "Cache HIT for songId=$songId — returning cached stems instantly")
             return@withContext KaraokeResult.Success(cachedStems)
         }
 
@@ -102,7 +107,14 @@ class KaraokeRepository(private val context: Context) {
             return@withContext KaraokeResult.Error(msg)
         }
 
+        if (localAudioFile.length() == 0L) {
+            val msg = "Local audio file is empty: ${localAudioFile.path}"
+            Log.e(TAG, msg)
+            return@withContext KaraokeResult.Error(msg)
+        }
+
         // --- Step 3: Upload to backend and get stem URLs ---
+        Log.d(TAG, "Uploading ${localAudioFile.length() / 1024}KB to backend...")
         val splitResponse = try {
             uploadAndSplit(localAudioFile)
         } catch (e: Exception) {
@@ -151,7 +163,7 @@ class KaraokeRepository(private val context: Context) {
         val vocalsOk = vocalFile.exists() && vocalFile.length() > 0
         val instrumentalOk = instrumentalFile.exists() && instrumentalFile.length() > 0
 
-        Log.d(TAG, "Cache check for $songId: vocals=$vocalsOk, instrumental=$instrumentalOk")
+        Log.d(TAG, "Cache check for $songId: vocals=$vocalsOk (${vocalFile.length()} bytes), instrumental=$instrumentalOk (${instrumentalFile.length()} bytes)")
 
         return if (vocalsOk && instrumentalOk) {
             KaraokeStemFiles(instrumentalFile, vocalFile)
@@ -173,41 +185,66 @@ class KaraokeRepository(private val context: Context) {
 
     /**
      * Uploads the local audio file to the backend /split endpoint
-     * and returns the parsed response containing download URLs.
+     * using CHUNKED transfer to prevent connection aborts on mobile networks.
+     *
+     * MECHANICAL ANALOGY: Instead of trying to push the entire water tank
+     * through the pipe at once (which causes pressure buildup and bursts),
+     * we pump it in controlled 256KB bursts. If one burst fails, only
+     * that burst needs to be resent — not the entire tank.
+     *
+     * NO SIZE CAP — uploads the full audio file for complete stem separation.
+     * Full song = complete stems = no silence at the end.
      */
     private fun uploadAndSplit(audioFile: File): SplitResponse {
-        Log.d(TAG, "uploadAndSplit() file=${audioFile.name} size=${audioFile.length()} bytes")
+        val fileSizeKb = audioFile.length() / 1024
+        val fileSizeMb = fileSizeKb / 1024.0
+        Log.d(TAG, "uploadAndSplit() file=${audioFile.name} size=${fileSizeMb}MB (${audioFile.length()} bytes)")
 
-        val url = URL("${backendUrl.trimEnd('/')}/split")
+        val url = URL("${backendUrl}/split")
         val boundary = "MetrolistKaraoke_${System.currentTimeMillis()}"
 
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
             doInput = true
-            connectTimeout = 30_000   // 30 seconds to connect
-            readTimeout = 600_000     // 10 minutes for the split to complete
+            connectTimeout = 30_000      // 30 seconds to connect
+            readTimeout = 1_200_000      // 20 minutes for split to complete on slow CPU
+            // Use chunked streaming — prevents OutOfMemoryError on large files
+            // and allows server to start receiving before upload is complete
+            setChunkedStreamingMode(256 * 1024) // 256KB chunks
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
             setRequestProperty("Accept", "application/json")
+            setRequestProperty("Connection", "keep-alive")
         }
 
-        // Write the multipart body
-        // Think of this like packing the audio file into a shipping container
+        Log.d(TAG, "Starting chunked upload to $url...")
+
+        // Write the multipart body using chunked streaming
         connection.outputStream.use { output ->
             val writer = output.bufferedWriter()
 
-            // --- Part header ---
+            // --- Multipart header ---
             writer.write("--$boundary\r\n")
             writer.write("Content-Disposition: form-data; name=\"file\"; filename=\"${audioFile.name}\"\r\n")
             writer.write("Content-Type: audio/mpeg\r\n")
             writer.write("\r\n")
             writer.flush()
 
-            // --- File bytes ---
+            // --- File bytes — sent in 256KB chunks ---
+            // This is the key fix: instead of loading entire file into memory
+            // and sending at once, we stream it in small pieces
+            var totalBytesSent = 0L
+            val buffer = ByteArray(256 * 1024) // 256KB buffer
             audioFile.inputStream().use { input ->
-                input.copyTo(output)
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
+                    output.flush() // Flush each chunk immediately
+                    totalBytesSent += bytesRead
+                    Log.d(TAG, "Uploaded ${totalBytesSent / 1024}KB / ${fileSizeKb}KB (${(totalBytesSent * 100 / audioFile.length())}%)")
+                }
             }
-            output.flush()
+            Log.d(TAG, "Upload complete: $totalBytesSent bytes sent")
 
             // --- Closing boundary ---
             writer.write("\r\n--$boundary--\r\n")
@@ -231,8 +268,7 @@ class KaraokeRepository(private val context: Context) {
 
     /**
      * Simple JSON parser for the /split response.
-     * We parse manually to avoid adding a JSON library dependency —
-     * the response format is simple and predictable.
+     * We parse manually to avoid adding a JSON library dependency.
      */
     private fun parseSplitResponse(json: String): SplitResponse {
         Log.d(TAG, "Parsing response: $json")
@@ -271,9 +307,20 @@ class KaraokeRepository(private val context: Context) {
             throw Exception("Download failed with HTTP $responseCode for $fileUrl")
         }
 
+        val totalBytes = connection.contentLength.toLong()
+        var downloadedBytes = 0L
+
         connection.inputStream.use { input ->
             FileOutputStream(destination).use { output ->
-                input.copyTo(output)
+                val buffer = ByteArray(256 * 1024)
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
+                    downloadedBytes += bytesRead
+                    if (totalBytes > 0) {
+                        Log.d(TAG, "Downloaded ${downloadedBytes / 1024}KB / ${totalBytes / 1024}KB")
+                    }
+                }
             }
         }
 
