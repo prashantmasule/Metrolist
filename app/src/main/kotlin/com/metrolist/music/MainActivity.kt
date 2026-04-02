@@ -40,7 +40,6 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -132,18 +131,23 @@ import com.metrolist.music.constants.DefaultOpenTabKey
 import com.metrolist.music.constants.DisableScreenshotKey
 import com.metrolist.music.constants.DynamicThemeKey
 import com.metrolist.music.constants.EnableHighRefreshRateKey
+import com.metrolist.music.constants.ExperimentalLyricsKey
 import com.metrolist.music.constants.LastSeenVersionKey
 import com.metrolist.music.constants.ListenTogetherInTopBarKey
 import com.metrolist.music.constants.ListenTogetherUsernameKey
+import com.metrolist.music.constants.LyricsProviderOrderKey
 import com.metrolist.music.constants.MiniPlayerBottomSpacing
 import com.metrolist.music.constants.MiniPlayerHeight
 import com.metrolist.music.constants.NavigationBarAnimationSpec
 import com.metrolist.music.constants.NavigationBarHeight
 import com.metrolist.music.constants.PauseListenHistoryKey
 import com.metrolist.music.constants.PauseSearchHistoryKey
+import com.metrolist.music.constants.PreferredLyricsProvider
+import com.metrolist.music.constants.PreferredLyricsProviderKey
 import com.metrolist.music.constants.PureBlackKey
 import com.metrolist.music.constants.SYSTEM_DEFAULT
 import com.metrolist.music.constants.SelectedThemeColorKey
+import com.metrolist.music.constants.SimpMusicMigrationDoneKey
 import com.metrolist.music.constants.SlimNavBarHeight
 import com.metrolist.music.constants.SlimNavBarKey
 import com.metrolist.music.constants.StopMusicOnTaskClearKey
@@ -152,6 +156,7 @@ import com.metrolist.music.constants.UseNewMiniPlayerDesignKey
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.db.entities.SearchHistory
 import com.metrolist.music.extensions.toEnum
+import com.metrolist.music.lyrics.LyricsProviderRegistry
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.DownloadUtil
 import com.metrolist.music.playback.MusicService
@@ -231,7 +236,13 @@ class MainActivity : ComponentActivity() {
     private var pendingIntent: Intent? = null
     private var latestVersionName by mutableStateOf(BuildConfig.VERSION_NAME)
 
-    private var playerConnection by mutableStateOf<PlayerConnection?>(null)
+    // Keep PlayerConnection as regular property - NOT mutableStateOf to prevent UI recomposition
+    // when it becomes null during onStop. Only update the snapshot for Compose when needed.
+    private var playerConnection: PlayerConnection? = null
+    
+    // This is the snapshot we pass to Compose - changes here trigger recomposition
+    private var playerConnectionSnapshot by mutableStateOf<PlayerConnection?>(null)
+    
     private var isServiceBound = false
 
     private val serviceConnection =
@@ -243,6 +254,7 @@ class MainActivity : ComponentActivity() {
                 if (service is MusicBinder) {
                     try {
                         playerConnection = PlayerConnection(this@MainActivity, service, database, lifecycleScope)
+                        playerConnectionSnapshot = playerConnection
                         Timber.tag("MainActivity").d("PlayerConnection created successfully")
                         // Connect Listen Together manager to player
                         listenTogetherManager.setPlayerConnection(playerConnection)
@@ -253,6 +265,7 @@ class MainActivity : ComponentActivity() {
                             delay(500)
                             try {
                                 playerConnection = PlayerConnection(this@MainActivity, service, database, lifecycleScope)
+                                playerConnectionSnapshot = playerConnection
                                 listenTogetherManager.setPlayerConnection(playerConnection)
                             } catch (e2: Exception) {
                                 Timber.tag("MainActivity").e(e2, "Failed to create PlayerConnection on retry")
@@ -266,7 +279,8 @@ class MainActivity : ComponentActivity() {
                 // Disconnect Listen Together manager
                 listenTogetherManager.setPlayerConnection(null)
                 playerConnection?.dispose()
-                playerConnection = null
+                // DO NOT null out playerConnection here - keep it for when service reconnects
+                // DO NOT update playerConnectionSnapshot - this is the key to preventing recomposition
             }
         }
 
@@ -280,7 +294,8 @@ class MainActivity : ComponentActivity() {
             isServiceBound = false
             listenTogetherManager.setPlayerConnection(null)
             playerConnection?.dispose()
-            playerConnection = null
+            // DO NOT null out playerConnection here - keep it for reconnection
+            // DO NOT update playerConnectionSnapshot - this prevents UI recomposition
         }
     }
 
@@ -302,16 +317,23 @@ class MainActivity : ComponentActivity() {
         // here ensures it persists independently of binding state, so Media3 never needs to
         // re-start it from a background context.
         startService(Intent(this, MusicService::class.java))
-        bindService(
-            Intent(this, MusicService::class.java),
-            serviceConnection,
-            BIND_AUTO_CREATE,
-        )
-        isServiceBound = true
+        
+        // Bind to service - if already bound, this is a no-op but ensures we stay connected
+        if (!isServiceBound) {
+            bindService(
+                Intent(this, MusicService::class.java),
+                serviceConnection,
+                BIND_AUTO_CREATE,
+            )
+            isServiceBound = true
+        }
     }
 
     override fun onStop() {
-        safeUnbindService("onStop()")
+        // CRITICAL FIX: Do NOT unbind service or dispose playerConnection here!
+        // Just disconnect ListenTogetherManager to stop audio routing
+        // This prevents UI recomposition when switching apps
+        listenTogetherManager.setPlayerConnection(null)
         super.onStop()
     }
 
@@ -323,6 +345,12 @@ class MainActivity : ComponentActivity() {
         ) {
             stopService(Intent(this, MusicService::class.java))
         }
+        
+        // Full cleanup - only on actual destroy
+        playerConnection?.dispose()
+        playerConnection = null
+        playerConnectionSnapshot = null
+        
         safeUnbindService("onDestroy()")
     }
 
@@ -374,7 +402,7 @@ class MainActivity : ComponentActivity() {
             MetrolistApp(
                 latestVersionName = latestVersionName,
                 onLatestVersionNameChange = { latestVersionName = it },
-                playerConnection = playerConnection,
+                playerConnection = playerConnectionSnapshot,
                 database = database,
                 downloadUtil = downloadUtil,
                 syncUtils = syncUtils,
@@ -552,7 +580,6 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(if (pureBlack) Color.Black else MaterialTheme.colorScheme.surface),
             ) {
-                val focusManager = LocalFocusManager.current
                 val density = LocalDensity.current
                 val configuration = LocalWindowInfo.current
                 val cutoutInsets = WindowInsets.displayCutout
@@ -568,6 +595,34 @@ class MainActivity : ComponentActivity() {
                     if (lastSeenVersion != currentVersion) {
                         showChangelog.value = true
                     }
+
+                    // SimpMusic Removal Migration
+                    if (dataStore.data.first()[SimpMusicMigrationDoneKey] != true) {
+                        dataStore.edit { settings ->
+                            // Remove SimpMusic from serialized order string and append Paxsenix if missing
+                            val currentOrder = settings[LyricsProviderOrderKey] ?: ""
+                            if (currentOrder.contains("SimpMusic") || !currentOrder.contains("Paxsenix")) {
+                                val orderList = currentOrder.split(",")
+                                    .map { it.trim() }
+                                    .filter { it.isNotBlank() && it != "SimpMusic" }
+                                    .toMutableList()
+                                
+                                if (!orderList.contains("Paxsenix")) {
+                                    orderList.add("Paxsenix")
+                                }
+                                
+                                settings[LyricsProviderOrderKey] = orderList.joinToString(",")
+                            }
+
+                            // Reset preferred provider if it was SimpMusic
+                            if (settings[PreferredLyricsProviderKey] == "SIMPMUSIC") {
+                                settings[PreferredLyricsProviderKey] = PreferredLyricsProvider.LRCLIB.name
+                            }
+
+                            settings[SimpMusicMigrationDoneKey] = true
+                        }
+                    }
+
                     dataStore.edit { settings ->
                         settings[LastSeenVersionKey] = currentVersion
                     }
@@ -948,15 +1003,36 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         bottomBar = {
+                            val currentBackStackEntry = navController.currentBackStackEntry // reads reactively outside remember
+
                             val onNavItemClick: (Screens, Boolean) -> Unit =
-                                remember(navController, coroutineScope, topAppBarScrollBehavior, playerBottomSheetState) {
+                                remember(navController, coroutineScope, topAppBarScrollBehavior, playerBottomSheetState, currentBackStackEntry) {
                                     { screen: Screens, isSelected: Boolean ->
                                         if (playerBottomSheetState.isExpanded) {
                                             playerBottomSheetState.collapseSoft()
                                         }
-
                                         if (isSelected) {
-                                            navController.currentBackStackEntry?.savedStateHandle?.set("scrollToTop", true)
+                                            val targetEntry = try {
+                                                val route = navController.currentBackStackEntry?.destination?.route
+                                                if (route == "search/{query}" || route == "search_input") {
+                                                    // For search screens, use search_input entry
+                                                    navController.getBackStackEntry("search_input")
+                                                } else {
+                                                    // For other screens, use current entry
+                                                    navController.currentBackStackEntry
+                                                }
+                                            } catch (e: Exception) {
+                                                null
+                                            }
+
+                                            // Use appropriate key based on screen type
+                                            if (screen == Screens.Search) {
+                                                val current = targetEntry?.savedStateHandle?.get<Int>("scrollToTopCount") ?: 0
+                                                targetEntry?.savedStateHandle?.set("scrollToTopCount", current + 1)
+                                            } else {
+                                                targetEntry?.savedStateHandle?.set("scrollToTop", true)
+                                            }
+
                                             coroutineScope.launch {
                                                 topAppBarScrollBehavior.state.resetHeightOffset()
                                             }

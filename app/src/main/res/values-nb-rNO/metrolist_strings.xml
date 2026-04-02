@@ -107,8 +107,6 @@
     <string name="lyrics_glow_effect_desc">Legg til glødende animasjon og sprett-effekt til gjeldende sangtekst</string>
     <string name="enable_better_lyrics">Aktiver Better Lyrics</string>
     <string name="enable_better_lyrics_desc">Bruk Better Lyrics-tjeneren til ord-for-ord sangtekster</string>
-    <string name="enable_simpmusic">Aktiver SimpMusic sangtekster</string>
-    <string name="enable_simpmusic_desc">Bruk SimpMusic Lyrics-tjeneren for synkroniserte sangtekster</string>
     <string name="auto_scroll">Re-synk</string>
     <string name="show_uploaded_playlist">Vis \"Opplastet\" spilleliste</string>
     <string name="shuffle_playlist_first">Shuffle spilleliste/album først</string>
@@ -116,4 +114,6 @@
     <string name="show_wrapped_card">Vis Wrapped-kort</string>
     <string name="skip_silence_desc">Hopp forbi stille deler av sanger</string>
     <string name="skip_silence_instant">Hopp over stillhet øyeblikkelig</string>
+    <string name="monthly_most_playlist_name">Månedlig mest</string>
+    <string name="restart">Restart</string>
 </resources>
