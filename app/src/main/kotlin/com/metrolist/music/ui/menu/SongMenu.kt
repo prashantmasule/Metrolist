@@ -35,7 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -117,11 +117,11 @@ fun SongMenu(
     val context = LocalContext.current
     val database = LocalDatabase.current
     val playerConnection = LocalPlayerConnection.current ?: return
-    val songState = database.song(originalSong.id).collectAsState(initial = originalSong)
+    val songState = database.song(originalSong.id).collectAsStateWithLifecycle(initialValue = originalSong)
     val song = songState.value ?: originalSong
     val download by LocalDownloadUtil.current
         .getDownload(originalSong.id)
-        .collectAsState(initial = null)
+        .collectAsStateWithLifecycle(initialValue = null)
     val coroutineScope = rememberCoroutineScope()
     val syncUtils = LocalSyncUtils.current
     val listenTogetherManager = LocalListenTogetherManager.current
@@ -136,7 +136,7 @@ fun SongMenu(
         label = "",
     )
 
-    val isPinned by database.speedDialDao.isPinned(song.id).collectAsState(initial = false)
+    val isPinned by database.speedDialDao.isPinned(song.id).collectAsStateWithLifecycle(initialValue = false)
 
     // Podcast subscription state for episodes
     val podcastEntity by produceState<PodcastEntity?>(initialValue = null, song) {
@@ -623,34 +623,8 @@ fun SongMenu(
                                     )
                                 },
                                 onClick = {
-                                    playlistSong?.let { ps ->
-                                        database.transaction {
-                                            move(
-                                                ps.map.playlistId,
-                                                ps.map.position,
-                                                Int.MAX_VALUE
-                                            )
-                                            delete(ps.map.copy(position = Int.MAX_VALUE))
-                                        }
-                                        playlistBrowseId?.let { browseId ->
-                                            syncUtils.scheduleRemoveFromPlaylist(
-                                                browseId,
-                                                ps.map.songId,
-                                                ps.map.playlistId
-                                            ) {
-                                                // Poll DB until setVideoId is available — it's written during first sync
-                                                var setVideoId: String? = null
-                                                for (attempt in 0 until 10) {
-                                                    setVideoId = database.getSetVideoId(ps.map.songId)?.setVideoId
-                                                    if (setVideoId != null) break
-                                                    delay(3_000L)
-                                                }
-                                                setVideoId
-                                            }
-                                        }
-                                        onDismiss()
-                                        playerConnection.playNext(song.toMediaItem())
-                                    }
+                                    onDismiss()
+                                    playerConnection.playNext(song.toMediaItem())
                                 },
                             )
                         } else {
@@ -850,26 +824,27 @@ fun SongMenu(
                                         )
                                     },
                                     onClick = {
-                                        database.transaction {
-                                            coroutineScope.launch {
-                                                playlistBrowseId?.let { playlistId ->
-                                                    if (playlistSong.map.setVideoId != null) {
-                                                        YouTube.removeFromPlaylist(
-                                                            playlistId,
-                                                            playlistSong.map.songId,
-                                                            playlistSong.map.setVideoId,
-                                                        )
-                                                    }
+                                        playlistSong?.let { ps ->
+                                            val capturedSetVideoId = ps.map.setVideoId
+                                            database.transaction {
+                                                move(
+                                                    ps.map.playlistId,
+                                                    ps.map.position,
+                                                    Int.MAX_VALUE
+                                                )
+                                                delete(ps.map.copy(position = Int.MAX_VALUE))
+                                            }
+                                            playlistBrowseId?.let { browseId ->
+                                                syncUtils.scheduleRemoveFromPlaylist(
+                                                    browseId,
+                                                    ps.map.songId,
+                                                    ps.map.playlistId
+                                                ) {
+                                                    capturedSetVideoId
                                                 }
                                             }
-                                            move(
-                                                playlistSong.map.playlistId,
-                                                playlistSong.map.position,
-                                                Int.MAX_VALUE,
-                                            )
-                                            delete(playlistSong.map.copy(position = Int.MAX_VALUE))
+                                            onDismiss()
                                         }
-                                        onDismiss()
                                     },
                                 ),
                             )

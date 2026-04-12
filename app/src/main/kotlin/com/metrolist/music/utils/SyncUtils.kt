@@ -1479,19 +1479,43 @@ class SyncUtils @Inject constructor(
 
                     Timber.d("syncPlaylist: Updating local playlist (remote: ${remoteIds.size}, local: ${localIds.size})")
 
+                    val localSongsBeforeSync = database.playlistSongs(playlistId).first()
+                    val downloadedSongIds = localSongsBeforeSync
+                        .filter { it.song.song.isDownloaded || it.song.song.dateDownload != null }
+                        .map { it.song.id }
+                        .toSet()
+
                     database.withTransaction {
                         database.clearPlaylist(playlistId)
-                        songs.forEachIndexed { idx, song ->
-                            if (database.song(song.id).firstOrNull() == null) {
+                        songs.forEach { song ->
+                            if (database.getSongByIdBlocking(song.id) == null) {
                                 database.insert(song)
                             }
-                            database.insert(
-                                PlaylistSongMap(
-                                    songId = song.id,
-                                    playlistId = playlistId,
-                                    position = idx,
-                                    setVideoId = song.setVideoId
-                                )
+                        }
+
+                        downloadedSongIds.forEach { songId ->
+                            if (songId !in remoteIds) {
+                                val existingSong = database.getSongByIdBlocking(songId)
+                                if (existingSong != null) {
+                                    val maxPosition = database.playlistSongsBlocking(playlistId)
+                                        .maxOfOrNull { it.map.position } ?: -1
+                                    database.insert(
+                                        PlaylistSongMap(
+                                            songId = songId,
+                                            playlistId = playlistId,
+                                            position = maxPosition + 1
+                                        )
+                                    )
+                                    Timber.d("syncPlaylist: Preserved downloaded song $songId in playlist")
+                                }
+                            }
+                        }
+
+                        val playlistEntity = database.playlistBlocking(playlistId)
+                        if (playlistEntity != null) {
+                            database.addSongsToPlaylist(
+                                playlistEntity,
+                                songs.map { it.id to it.setVideoId }
                             )
                         }
                     }

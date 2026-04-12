@@ -65,6 +65,17 @@ import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.util.Locale
 
+/**
+ * Helloo! Note from a dev:
+ * SQL Injection Prevention:
+ * - All queries use Room's parameterized query syntax with :paramName placeholders
+ * - Query parameters are automatically sanitized by Room's SQLite implementation
+ * - NEVER concatenate user input directly into queries (e.g., "WHERE id = " + userInput)
+ * - Room automatically handles escaping and prevents SQL injection attacks
+ *
+ * Safe pattern: @Query("SELECT * FROM song WHERE id = :songId")
+ * Unsafe pattern: @Query("SELECT * FROM song WHERE id = " + userInput) // DO NOT USE
+ */
 @Dao
 interface DatabaseDao {
     @Transaction
@@ -179,6 +190,18 @@ interface DatabaseDao {
     @Transaction
     @Query("SELECT * FROM playlist_song_map WHERE playlistId = :playlistId ORDER BY position")
     fun playlistSongs(playlistId: String): Flow<List<PlaylistSong>>
+
+    @Transaction
+    @Query(
+        """
+        SELECT DISTINCT song.*
+        FROM song
+        JOIN playlist_song_map ON playlist_song_map.songId = song.id
+        JOIN playlist ON playlist.id = playlist_song_map.playlistId
+        WHERE playlist.bookmarkedAt IS NOT NULL
+        """,
+    )
+    fun songsInBookmarkedPlaylists(): Flow<List<Song>>
 
     @Transaction
     @Query(
@@ -1069,17 +1092,50 @@ interface DatabaseDao {
         playlistId: String,
         now: LocalDateTime = LocalDateTime.now(),
     )
-    @Transaction
+     @Transaction
     fun addSongToPlaylist(playlist: Playlist, songIds: List<String>) {
         var position = playlist.songCount
         songIds.forEach { id ->
-            insert(
-                PlaylistSongMap(
-                    songId = id,
-                    playlistId = playlist.id,
-                    position = position++
+            val existingSong = getSongByIdBlocking(id)
+            if (existingSong != null) {
+                insert(
+                    PlaylistSongMap(
+                        songId = id,
+                        playlistId = playlist.id,
+                        position = position++
+                    )
                 )
-            )
+            }
+        }
+        updatePlaylistLastUpdated(playlist.id)
+    }
+    
+    // This prevents songs from being removed during automatic playlist synchronization
+    @Transaction
+    fun addSongsToPlaylist(
+        playlist: Playlist,
+        songs: List<Pair<String, String?>>  // Pair of (songId, setVideoId)
+    ) {
+        val now = LocalDateTime.now()
+        var position = playlist.songCount
+
+        songs.forEach { (id, setVideoId) ->
+            val existingSong = getSongByIdBlocking(id)
+            if (existingSong != null) {
+                // If song already exists, update it to mark as inLibrary if not already marked
+                if (existingSong.song.inLibrary == null) {
+                    inLibrary(id, now)
+                }
+                // Add to playlist mapping, preserving setVideoId for reordering operations
+                insert(
+                    PlaylistSongMap(
+                        songId = id,
+                        playlistId = playlist.id,
+                        position = position++,
+                        setVideoId = setVideoId
+                    )
+                )
+            }
         }
         updatePlaylistLastUpdated(playlist.id)
     }
@@ -1106,6 +1162,16 @@ interface DatabaseDao {
         SongSortType.PLAY_TIME -> downloadedSongsByPlayTimeAsc()
     }.map { it.reversed(descending) }
 
+    @Transaction
+    @Query("SELECT * FROM playlist_song_map WHERE playlistId = :playlistId ORDER BY position")
+    fun playlistSongsBlocking(playlistId: String): List<PlaylistSong>
+
+    @Transaction
+    @Query(
+        "SELECT *, (SELECT COUNT(*) FROM playlist_song_map WHERE playlistId = playlist.id) " +
+                "AS songCount FROM playlist WHERE id = :playlistId"
+    )
+    fun playlistBlocking(playlistId: String): Playlist?
     @Transaction
     @Query("SELECT * FROM song WHERE isDownloaded = 1 AND (isEpisode = 0 OR isEpisode IS NULL) ORDER BY dateDownload")
     fun downloadedSongsByCreateDateAsc(): Flow<List<Song>>

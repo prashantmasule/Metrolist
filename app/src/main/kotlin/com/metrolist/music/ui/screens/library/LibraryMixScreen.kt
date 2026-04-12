@@ -11,10 +11,14 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -24,22 +28,29 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.Indicator
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -69,18 +80,29 @@ import com.metrolist.music.db.entities.Album
 import com.metrolist.music.db.entities.Artist
 import com.metrolist.music.db.entities.Playlist
 import com.metrolist.music.db.entities.PlaylistEntity
+import com.metrolist.music.db.entities.Song
+import com.metrolist.music.extensions.matchesNormalizedQuery
+import com.metrolist.music.extensions.normalizeForSearch
 import com.metrolist.music.extensions.reversed
+import com.metrolist.music.extensions.toMediaItem
+import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.ui.component.AlbumGridItem
 import com.metrolist.music.ui.component.AlbumListItem
 import com.metrolist.music.ui.component.ArtistGridItem
 import com.metrolist.music.ui.component.ArtistListItem
+import com.metrolist.music.ui.component.CreatePlaylistDialog
+import com.metrolist.music.ui.component.LibrarySearchEmptyPlaceholder
+import com.metrolist.music.ui.component.LibrarySearchHeader
 import com.metrolist.music.ui.component.LocalMenuState
 import com.metrolist.music.ui.component.PlaylistGridItem
 import com.metrolist.music.ui.component.PlaylistListItem
+import com.metrolist.music.ui.component.SongGridItem
+import com.metrolist.music.ui.component.SongListItem
 import com.metrolist.music.ui.component.SortHeader
 import com.metrolist.music.ui.menu.AlbumMenu
 import com.metrolist.music.ui.menu.ArtistMenu
 import com.metrolist.music.ui.menu.PlaylistMenu
+import com.metrolist.music.ui.menu.SongMenu
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.viewmodels.LibraryMixViewModel
@@ -88,7 +110,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.Collator
 import java.time.LocalDateTime
-import java.util.Locale
 import java.util.UUID
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -100,9 +121,11 @@ fun LibraryMixScreen(
 ) {
     val menuState = LocalMenuState.current
     val haptic = LocalHapticFeedback.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val queueSearchedSongsStr = stringResource(R.string.queue_searched_songs)
     val playerConnection = LocalPlayerConnection.current ?: return
-    val isPlaying by playerConnection.isEffectivelyPlaying.collectAsState()
-    val mediaMetadata by playerConnection.mediaMetadata.collectAsState()
+    val isPlaying by playerConnection.isEffectivelyPlaying.collectAsStateWithLifecycle()
+    val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
 
     var viewType by rememberEnumPreference(AlbumViewTypeKey, LibraryViewType.GRID)
     val (sortType, onSortTypeChange) =
@@ -115,7 +138,30 @@ fun LibraryMixScreen(
 
     val (ytmSync) = rememberPreference(YtmSyncKey, true)
 
-    val topSize by viewModel.topValue.collectAsState(initial = 50)
+    var isSearchActive by rememberSaveable { mutableStateOf(false) }
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val debouncedSearchQuery by viewModel.debouncedSearchQuery.collectAsStateWithLifecycle()
+    var showCreatePlaylistDialog by rememberSaveable { mutableStateOf(false) }
+    
+    if (showCreatePlaylistDialog) {
+        CreatePlaylistDialog(
+            onDismiss = { showCreatePlaylistDialog = false },
+            onPlaylistCreated = { playlistId ->
+                showCreatePlaylistDialog = false
+                navController.navigate("local_playlist/$playlistId")
+            }
+        )
+    }
+    
+    val normalizedQuery = remember(isSearchActive, searchQuery, debouncedSearchQuery) {
+        if (isSearchActive) {
+            searchQuery.normalizeForSearch()
+        } else {
+            debouncedSearchQuery.normalizeForSearch()
+        }
+    }
+
+    val topSize by viewModel.topValue.collectAsStateWithLifecycle(initialValue = 50)
     val likedPlaylist =
         Playlist(
             playlist =
@@ -149,7 +195,7 @@ fun LibraryMixScreen(
             songThumbnails = emptyList(),
         )
 
-    val cachePlaylist =
+    val cachedPlaylist =
         Playlist(
             playlist =
                 PlaylistEntity(
@@ -176,14 +222,28 @@ fun LibraryMixScreen(
     val (showTop) = rememberPreference(ShowTopPlaylistKey, true)
     val (showCached) = rememberPreference(ShowCachedPlaylistKey, true)
     val (showUploaded) = rememberPreference(ShowUploadedPlaylistKey, true)
+    
+    val showLikedPlaylist = showLiked && matchesNormalizedQuery(normalizedQuery, likedPlaylist.playlist.name)
+    val showDownloadedPlaylist =
+        showDownloaded && matchesNormalizedQuery(normalizedQuery, downloadPlaylist.playlist.name)
+    val showTopPlaylists = showTop && matchesNormalizedQuery(normalizedQuery, topPlaylist.playlist.name)
+    val showUploadedPlaylists =
+        showUploaded && matchesNormalizedQuery(normalizedQuery, uploadedPlaylist.playlist.name)
+    val showCachedPlaylists = showCached && matchesNormalizedQuery(normalizedQuery, cachedPlaylist.playlist.name)
 
-    val albums = viewModel.albums.collectAsState()
-    val artist = viewModel.artists.collectAsState()
-    val playlist = viewModel.playlists.collectAsState()
+
+    val albums = viewModel.albums.collectAsStateWithLifecycle()
+    val artist = viewModel.artists.collectAsStateWithLifecycle()
+    val songs = viewModel.songs.collectAsStateWithLifecycle()
+    val playlist = viewModel.playlists.collectAsStateWithLifecycle()
 
     var allItems = albums.value + artist.value + playlist.value
-    val collator = Collator.getInstance(LocalLocale.current.platformLocale)
-    collator.strength = Collator.PRIMARY
+    val locale = LocalLocale.current.platformLocale
+    val collator = remember(locale) {
+        Collator.getInstance(locale).apply {
+            strength = Collator.PRIMARY
+        }
+    }
     allItems =
         when (sortType) {
             MixSortType.CREATE_DATE -> {
@@ -222,13 +282,83 @@ fun LibraryMixScreen(
             }
         }.reversed(sortDescending)
 
+    val searchableItems = if (normalizedQuery.isBlank()) allItems else allItems + songs.value
+
+    val filteredItems = remember(searchableItems, normalizedQuery, collator) {
+        val matchedItems =
+            searchableItems.filter { item ->
+                when (item) {
+                    is Song -> {
+                        val artistNames = item.orderedArtists.map { it.name }.toTypedArray()
+                        matchesNormalizedQuery(normalizedQuery, item.song.title, item.song.albumName, *artistNames)
+                    }
+
+                    is Album -> {
+                        val artistNames = item.artists.map { it.name }.toTypedArray()
+                        matchesNormalizedQuery(normalizedQuery, item.album.title, *artistNames)
+                    }
+
+                    is Artist -> matchesNormalizedQuery(normalizedQuery, item.artist.name)
+                    is Playlist -> matchesNormalizedQuery(normalizedQuery, item.playlist.name)
+                    else -> true
+                }
+            }
+
+        if (normalizedQuery.isBlank()) {
+            matchedItems.distinctBy { it.id }
+        } else {
+            matchedItems
+                .sortedWith { first, second ->
+                    val firstPriority =
+                        when (first) {
+                            is Playlist -> 0
+                            is Song -> 1
+                            is Artist -> 2
+                            is Album -> 3
+                            else -> 4
+                        }
+                    val secondPriority =
+                        when (second) {
+                            is Playlist -> 0
+                            is Song -> 1
+                            is Artist -> 2
+                            is Album -> 3
+                            else -> 4
+                        }
+
+                    if (firstPriority != secondPriority) {
+                        firstPriority.compareTo(secondPriority)
+                    } else {
+                        val firstName =
+                            when (first) {
+                                is Playlist -> first.playlist.name
+                                is Song -> first.song.title
+                                is Artist -> first.artist.name
+                                is Album -> first.album.title
+                                else -> ""
+                            }
+                        val secondName =
+                            when (second) {
+                                is Playlist -> second.playlist.name
+                                is Song -> second.song.title
+                                is Artist -> second.artist.name
+                                is Album -> second.album.title
+                                else -> ""
+                            }
+                        collator.compare(firstName, secondName)
+                    }
+                }
+                .distinctBy { it.id }
+        }
+    }
+
     val coroutineScope = rememberCoroutineScope()
 
     val lazyListState = rememberLazyListState()
     val lazyGridState = rememberLazyGridState()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val scrollToTop =
-        backStackEntry?.savedStateHandle?.getStateFlow("scrollToTop", false)?.collectAsState()
+        backStackEntry?.savedStateHandle?.getStateFlow("scrollToTop", false)?.collectAsStateWithLifecycle()
 
     LaunchedEffect(scrollToTop?.value) {
         if (scrollToTop?.value == true) {
@@ -249,8 +379,15 @@ fun LibraryMixScreen(
     }
 
     val headerContent = @Composable {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        LibrarySearchHeader(
+            isSearchActive = isSearchActive,
+            searchQuery = searchQuery,
+            onSearchQueryChange = viewModel::updateSearchQuery,
+            onBack = {
+                isSearchActive = false
+                viewModel.updateSearchQuery("")
+            },
+            keyboardController = keyboardController,
             modifier = Modifier.padding(start = 16.dp),
         ) {
             SortHeader(
@@ -270,26 +407,41 @@ fun LibraryMixScreen(
             Spacer(Modifier.weight(1f))
 
             IconButton(
+                onClick = { isSearchActive = true },
+                modifier = Modifier.padding(start = 8.dp).size(40.dp),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.search),
+                    contentDescription = stringResource(R.string.search),
+                )
+            }
+
+            IconButton(
                 onClick = {
                     viewType = viewType.toggle()
                 },
-                modifier = Modifier.padding(start = 6.dp, end = 6.dp),
+                modifier = Modifier.padding(end = 8.dp).size(40.dp),
             ) {
                 Icon(
                     painter =
-                        painterResource(
-                            when (viewType) {
-                                LibraryViewType.LIST -> R.drawable.list
-                                LibraryViewType.GRID -> R.drawable.grid_view
-                            },
-                        ),
-                    contentDescription = null,
+                    painterResource(
+                        when (viewType) {
+                            LibraryViewType.LIST -> R.drawable.list
+                            LibraryViewType.GRID -> R.drawable.grid_view
+                        },
+                    ),
+                    contentDescription = stringResource(
+                        when (viewType) {
+                            LibraryViewType.LIST -> R.string.switch_to_grid_view
+                            LibraryViewType.GRID -> R.string.switch_to_list_view
+                        },
+                    ),
                 )
             }
         }
     }
 
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val pullRefreshState = rememberPullToRefreshState()
 
     Box(
@@ -322,7 +474,7 @@ fun LibraryMixScreen(
                         headerContent()
                     }
 
-                    if (showLiked) {
+                    if (showLikedPlaylist) {
                         item(
                             key = "likedPlaylist",
                             contentType = { CONTENT_TYPE_PLAYLIST },
@@ -340,7 +492,7 @@ fun LibraryMixScreen(
                         }
                     }
 
-                    if (showDownloaded) {
+                    if (showDownloadedPlaylist) {
                         item(
                             key = "downloadedPlaylist",
                             contentType = { CONTENT_TYPE_PLAYLIST },
@@ -353,12 +505,32 @@ fun LibraryMixScreen(
                                         .fillMaxWidth()
                                         .clickable {
                                             navController.navigate("auto_playlist/downloaded")
-                                        }.animateItem(),
+                                        }
+                                        .animateItem(),
                             )
                         }
                     }
 
-                    if (showTop) {
+                    if (showCachedPlaylists) {
+                        item(
+                            key = "cachedPlaylist",
+                            contentType = { CONTENT_TYPE_PLAYLIST },
+                        ) {
+                            PlaylistListItem(
+                                playlist = cachedPlaylist,
+                                autoPlaylist = true,
+                                modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        navController.navigate("cache_playlist/cached")
+                                    }
+                                    .animateItem(),
+                            )
+                        }
+                    }
+
+                    if (showTopPlaylists) {
                         item(
                             key = "TopPlaylist",
                             contentType = { CONTENT_TYPE_PLAYLIST },
@@ -376,25 +548,7 @@ fun LibraryMixScreen(
                         }
                     }
 
-                    if (showCached) {
-                        item(
-                            key = "cachePlaylist",
-                            contentType = { CONTENT_TYPE_PLAYLIST },
-                        ) {
-                            PlaylistListItem(
-                                playlist = cachePlaylist,
-                                autoPlaylist = true,
-                                modifier =
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            navController.navigate("cache_playlist/cached")
-                                        }.animateItem(),
-                            )
-                        }
-                    }
-
-                    if (showUploaded) {
+                    if (showUploadedPlaylists) {
                         item(
                             key = "uploadedPlaylist",
                             contentType = { CONTENT_TYPE_PLAYLIST },
@@ -413,8 +567,8 @@ fun LibraryMixScreen(
                     }
 
                     items(
-                        items = allItems.distinctBy { it.id },
-                        key = { "lib_mix_list_${it.id}" },
+                        items = filteredItems,
+                        key = { it.id },
                         contentType = { CONTENT_TYPE_PLAYLIST },
                     ) { item ->
                         when (item) {
@@ -463,6 +617,63 @@ fun LibraryMixScreen(
                                                     }
                                                 },
                                             ).animateItem(),
+                                )
+                            }
+
+                            is Song -> {
+                                SongListItem(
+                                    song = item,
+                                    showInLibraryIcon = true,
+                                    isActive = item.id == mediaMetadata?.id,
+                                    isPlaying = isPlaying,
+                                    trailingContent = {
+                                        IconButton(
+                                            onClick = {
+                                                menuState.show {
+                                                    SongMenu(
+                                                        originalSong = item,
+                                                        navController = navController,
+                                                        onDismiss = menuState::dismiss,
+                                                    )
+                                                }
+                                            },
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(R.drawable.more_vert),
+                                                contentDescription = null,
+                                            )
+                                        }
+                                    },
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .combinedClickable(
+                                                onClick = {
+                                                    if (item.id == mediaMetadata?.id) {
+                                                        playerConnection.togglePlayPause()
+                                                    } else {
+                                                        val filteredSongs = filteredItems.filterIsInstance<Song>()
+                                                        playerConnection.playQueue(
+                                                            ListQueue(
+                                                                title = queueSearchedSongsStr,
+                                                                items = filteredSongs.map { it.toMediaItem() },
+                                                                startIndex = filteredSongs.indexOfFirst { it.id == item.id },
+                                                            ),
+                                                        )
+                                                    }
+                                                },
+                                                onLongClick = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    menuState.show {
+                                                        SongMenu(
+                                                            originalSong = item,
+                                                            navController = navController,
+                                                            onDismiss = menuState::dismiss,
+                                                        )
+                                                    }
+                                                },
+                                            )
+                                            .animateItem(),
                                 )
                             }
 
@@ -555,6 +766,20 @@ fun LibraryMixScreen(
                             else -> {}
                         }
                     }
+
+                    if (
+                        filteredItems.isEmpty() &&
+                        !showLikedPlaylist &&
+                        !showDownloadedPlaylist &&
+                        !showCachedPlaylists &&
+                        !showTopPlaylists &&
+                        !showUploadedPlaylists &&
+                        searchQuery.isNotBlank()
+                    ) {
+                        item(key = "empty_search_result") {
+                            LibrarySearchEmptyPlaceholder(modifier = Modifier.animateItem())
+                        }
+                    }
                 }
             }
 
@@ -583,7 +808,7 @@ fun LibraryMixScreen(
                         headerContent()
                     }
 
-                    if (showLiked) {
+                    if (showLikedPlaylist) {
                         item(
                             key = "likedPlaylist",
                             contentType = { CONTENT_TYPE_PLAYLIST },
@@ -604,7 +829,7 @@ fun LibraryMixScreen(
                         }
                     }
 
-                    if (showDownloaded) {
+                    if (showDownloadedPlaylist) {
                         item(
                             key = "downloadedPlaylist",
                             contentType = { CONTENT_TYPE_PLAYLIST },
@@ -620,12 +845,35 @@ fun LibraryMixScreen(
                                             onClick = {
                                                 navController.navigate("auto_playlist/downloaded")
                                             },
-                                        ).animateItem(),
+                                        )
+                                        .animateItem(),
                             )
                         }
                     }
 
-                    if (showTop) {
+                    if (showCachedPlaylists) {
+                        item(
+                            key = "cachedPlaylist",
+                            contentType = { CONTENT_TYPE_PLAYLIST },
+                        ) {
+                            PlaylistGridItem(
+                                playlist = cachedPlaylist,
+                                fillMaxWidth = true,
+                                autoPlaylist = true,
+                                modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = {
+                                            navController.navigate("cache_playlist/cached")
+                                        },
+                                    )
+                                    .animateItem(),
+                            )
+                        }
+                    }
+
+                    if (showTopPlaylists) {
                         item(
                             key = "TopPlaylist",
                             contentType = { CONTENT_TYPE_PLAYLIST },
@@ -646,28 +894,7 @@ fun LibraryMixScreen(
                         }
                     }
 
-                    if (showCached) {
-                        item(
-                            key = "cachePlaylist",
-                            contentType = { CONTENT_TYPE_PLAYLIST },
-                        ) {
-                            PlaylistGridItem(
-                                playlist = cachePlaylist,
-                                fillMaxWidth = true,
-                                autoPlaylist = true,
-                                modifier =
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .combinedClickable(
-                                            onClick = {
-                                                navController.navigate("cache_playlist/cached")
-                                            },
-                                        ).animateItem(),
-                            )
-                        }
-                    }
-
-                    if (showUploaded) {
+                    if (showUploadedPlaylists) {
                         item(
                             key = "uploadedPlaylist",
                             contentType = { CONTENT_TYPE_PLAYLIST },
@@ -687,8 +914,8 @@ fun LibraryMixScreen(
                     }
 
                     items(
-                        items = allItems.distinctBy { it.id },
-                        key = { "lib_mix_grid_${it.id}" },
+                        items = filteredItems,
+                        key = { it.id },
                         contentType = { CONTENT_TYPE_PLAYLIST },
                     ) { item ->
                         when (item) {
@@ -720,6 +947,46 @@ fun LibraryMixScreen(
                                                     }
                                                 },
                                             ).animateItem(),
+                                )
+                            }
+
+                            is Song -> {
+                                SongGridItem(
+                                    song = item,
+                                    showInLibraryIcon = true,
+                                    isActive = item.id == mediaMetadata?.id,
+                                    isPlaying = isPlaying,
+                                    fillMaxWidth = true,
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .combinedClickable(
+                                                onClick = {
+                                                    if (item.id == mediaMetadata?.id) {
+                                                        playerConnection.togglePlayPause()
+                                                    } else {
+                                                        val filteredSongs = filteredItems.filterIsInstance<Song>()
+                                                        playerConnection.playQueue(
+                                                            ListQueue(
+                                                                title = queueSearchedSongsStr,
+                                                                items = filteredSongs.map { it.toMediaItem() },
+                                                                startIndex = filteredSongs.indexOfFirst { it.id == item.id },
+                                                            ),
+                                                        )
+                                                    }
+                                                },
+                                                onLongClick = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    menuState.show {
+                                                        SongMenu(
+                                                            originalSong = item,
+                                                            navController = navController,
+                                                            onDismiss = menuState::dismiss,
+                                                        )
+                                                    }
+                                                },
+                                            )
+                                            .animateItem(),
                                 )
                             }
 
@@ -779,8 +1046,42 @@ fun LibraryMixScreen(
                             else -> {}
                         }
                     }
+
+                    if (
+                        filteredItems.isEmpty() &&
+                        !showLikedPlaylist &&
+                        !showDownloadedPlaylist &&
+                        !showCachedPlaylists &&
+                        !showTopPlaylists &&
+                        !showUploadedPlaylists &&
+                        searchQuery.isNotBlank()
+                    ) {
+                        item(
+                            key = "empty_search_result",
+                            span = { GridItemSpan(maxLineSpan) },
+                        ) {
+                            LibrarySearchEmptyPlaceholder(modifier = Modifier.animateItem())
+                        }
+                    }
                 }
             }
+        }
+
+        // Always visible + button (no scroll hiding)
+        FloatingActionButton(
+            onClick = { showCreatePlaylistDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .windowInsetsPadding(
+                    LocalPlayerAwareWindowInsets.current
+                        .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
+                )
+                .padding(16.dp)
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.add),
+                contentDescription = stringResource(R.string.create_playlist),
+            )
         }
 
         Indicator(

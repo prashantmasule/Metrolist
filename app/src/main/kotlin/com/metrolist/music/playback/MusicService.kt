@@ -32,6 +32,7 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
 import androidx.datastore.preferences.core.edit
@@ -90,6 +91,7 @@ import com.metrolist.music.constants.AudioQualityKey
 import com.metrolist.music.constants.AutoDownloadOnLikeKey
 import com.metrolist.music.constants.AutoLoadMoreKey
 import com.metrolist.music.constants.AutoSkipNextOnErrorKey
+import com.metrolist.music.constants.AutoplayKey
 import com.metrolist.music.constants.CrossfadeDurationKey
 import com.metrolist.music.constants.CrossfadeEnabledKey
 import com.metrolist.music.constants.CrossfadeGaplessKey
@@ -136,6 +138,7 @@ import com.metrolist.music.constants.ShufflePlaylistFirstKey
 import com.metrolist.music.constants.SimilarContent
 import com.metrolist.music.constants.SkipSilenceInstantKey
 import com.metrolist.music.constants.SkipSilenceKey
+import com.metrolist.music.constants.StopMusicOnTaskClearKey
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.db.entities.Event
 import com.metrolist.music.db.entities.FormatEntity
@@ -465,49 +468,8 @@ class MusicService :
         // 3. Connect the processor to the service
         // handled in createExoPlayer
 
-        try {
-            val nm = getSystemService(NotificationManager::class.java)
-            nm?.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    getString(R.string.music_player),
-                    NotificationManager.IMPORTANCE_LOW,
-                ),
-            )
-            val pending =
-                PendingIntent.getActivity(
-                    this,
-                    0,
-                    Intent(this, MainActivity::class.java),
-                    PendingIntent.FLAG_IMMUTABLE,
-                )
-            val notification: Notification =
-                NotificationCompat
-                    .Builder(this, CHANNEL_ID)
-                    .setContentTitle(getString(R.string.music_player))
-                    .setContentText("")
-                    .setSmallIcon(R.drawable.small_icon)
-                    .setContentIntent(pending)
-                    .setOngoing(true)
-                    .build()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-        } catch (e: Exception) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                e is ForegroundServiceStartNotAllowedException
-            ) {
-                Timber.tag(TAG).w("Foreground service start not allowed (likely app in background)")
-            } else {
-                Timber.tag(TAG).e(e, "Failed to create foreground notification")
-                reportException(e)
-            }
+        if (!ensureStartedAsForegroundOrStop()) {
+            return
         }
 
         setMediaNotificationProvider(
@@ -1832,14 +1794,9 @@ class MusicService :
                 return@launch
             }
 
-            database.query {
-                insert(
-                    com.metrolist.music.db.entities.PlaylistSongMap(
-                        playlistId = targetPlaylistId,
-                        songId = currentSong.id,
-                        position = Int.MAX_VALUE,
-                    ),
-                )
+            val targetPlaylist = database.playlist(targetPlaylistId).first()
+            if (targetPlaylist != null) {
+                database.addSongsToPlaylist(targetPlaylist, listOf(currentSong.id to null))
             }
         }
     }
@@ -2130,13 +2087,35 @@ class MusicService :
     override fun onPlaybackStateChanged(
         @Player.State playbackState: Int,
     ) {
-        // Force Repeat All if the player ignored it and ended playback
+        // Handle autoplay - skip to next song when playback ends
         if (playbackState == Player.STATE_ENDED) {
+            // Check sleep timer guard - don't autoplay/repeat if sleep timer will pause
+            if (sleepTimer.isActive && sleepTimer.pauseWhenSongEnd) {
+                return
+            }
+
             val repeatMode = runBlocking { dataStore.get(RepeatModeKey, REPEAT_MODE_OFF) }
+            
+            // Handle Repeat All mode
             if (repeatMode == REPEAT_MODE_ALL && player.mediaItemCount > 0) {
                 player.seekTo(0, 0)
                 player.prepare()
                 player.play()
+                return
+            }
+            
+            // Handle Repeat One mode - restart current song
+            if (repeatMode == REPEAT_MODE_ONE) {
+                player.seekTo(player.currentMediaItemIndex, 0)
+                player.prepare()
+                player.play()
+                return
+            }
+            
+            // Handle autoplay - check if there's a next item to play
+            val autoplay = runBlocking { dataStore.get(AutoplayKey, true) }
+            if (autoplay && player.hasNextMediaItem()) {
+                player.seekToNextMediaItem()
             }
         }
 
@@ -2783,9 +2762,8 @@ class MusicService :
                 performAggressiveCacheClear(mediaId)
                 delay(RETRY_DELAY_MS)
 
-                val currentPosition = player.currentPosition
                 val currentIndex = player.currentMediaItemIndex
-                player.seekTo(currentIndex, currentPosition)
+                player.stop()
                 player.prepare()
 
                 Timber.tag(TAG).d("Retrying playback for $mediaId after generic IO error")
@@ -3221,8 +3199,68 @@ class MusicService :
         }
     }
 
+    /**
+     * [Context.startForegroundService] requires [startForeground] to succeed quickly. If we cannot
+     * enter the foreground state, stop immediately so the system does not ANR the app process.
+     */
+    private fun ensureStartedAsForegroundOrStop(): Boolean =
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm?.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    getString(R.string.music_player),
+                    NotificationManager.IMPORTANCE_LOW,
+                ),
+            )
+            val pending =
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    Intent(this, MainActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE,
+                )
+            val notification: Notification =
+                NotificationCompat
+                    .Builder(this, CHANNEL_ID)
+                    .setContentTitle(getString(R.string.music_player))
+                    .setContentText("")
+                    .setSmallIcon(R.drawable.small_icon)
+                    .setContentIntent(pending)
+                    .setOngoing(true)
+                    .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            true
+        } catch (e: ForegroundServiceStartNotAllowedException) {
+            Timber.tag(TAG).w(e, "Foreground service start not allowed; stopping service to avoid ANR")
+            stopSelf()
+            false
+        } catch (e: Exception) {
+            Timber.tag(TAG).e(e, "Failed to enter foreground; stopping service to avoid ANR")
+            reportException(e)
+            stopSelf()
+            false
+        }
+
     override fun onDestroy() {
         isRunning = false
+
+        if (!::player.isInitialized) {
+            try {
+                scope.cancel()
+            } catch (_: Exception) {
+            }
+            super.onDestroy()
+            return
+        }
 
         // Save episode position before destroying
         val currentMetadata = player.currentMediaItem?.metadata
@@ -3267,6 +3305,16 @@ class MusicService :
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
+        if (dataStore.get(StopMusicOnTaskClearKey, false)) {
+            player.stop()
+            stopSelf()
+            return
+        }
+        // User removed the task while paused: drop foreground promotion so the process can idle.
+        // Queue/state remain persisted; opening the app restores playback as usual.
+        if (!player.isPlaying) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH)
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = mediaSession

@@ -36,7 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -113,8 +113,8 @@ fun YouTubePlaylistMenu(
     val playerConnection = LocalPlayerConnection.current ?: return
     val listenTogetherManager = LocalListenTogetherManager.current
     val isGuest = listenTogetherManager?.isInRoom == true && !listenTogetherManager.isHost
-    val dbPlaylist by database.playlistByBrowseId(playlist.id).collectAsState(initial = null)
-    val isPinned by database.speedDialDao.isPinned(playlist.id).collectAsState(initial = false)
+    val dbPlaylist by database.playlistByBrowseId(playlist.id).collectAsStateWithLifecycle(initialValue = null)
+    val isPinned by database.speedDialDao.isPinned(playlist.id).collectAsStateWithLifecycle(initialValue = false)
 
     var showChoosePlaylistDialog by rememberSaveable { mutableStateOf(false) }
     var showImportPlaylistDialog by rememberSaveable { mutableStateOf(false) }
@@ -189,9 +189,9 @@ fun YouTubePlaylistMenu(
                         }
                         coroutineScope.launch(Dispatchers.IO) {
                             if (!isCurrentlySaved) {
-                                val playlistEntity = database.playlistByBrowseId(playlist.id).first()?.playlist
-                                if (playlistEntity != null) {
-                                    songs
+                                val playlistFull = database.playlistByBrowseId(playlist.id).first()
+                                if (playlistFull != null) {
+                                    val songIds = songs
                                         .ifEmpty {
                                             YouTube
                                                 .playlist(playlist.id)
@@ -201,14 +201,8 @@ fun YouTubePlaylistMenu(
                                                 .orEmpty()
                                         }.map { it.toMediaMetadata() }
                                         .onEach { database.transaction { insert(it) } }
-                                        .mapIndexed { index, song ->
-                                            PlaylistSongMap(
-                                                songId = song.id,
-                                                playlistId = playlistEntity.id,
-                                                position = index,
-                                                setVideoId = song.setVideoId,
-                                            )
-                                        }.forEach { database.transaction { insert(it) } }
+                                        .map { it.id to it.setVideoId }
+                                    database.addSongsToPlaylist(playlistFull, songIds)
                                 }
                             }
                             if (playlist.isPodcast) {

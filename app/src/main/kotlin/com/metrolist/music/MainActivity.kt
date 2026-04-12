@@ -68,7 +68,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -311,12 +311,11 @@ class MainActivity : ComponentActivity() {
         // Explicitly start the service so it becomes an "explicitly started" service.
         // Without this, the service only exists while a client is bound (BIND_AUTO_CREATE).
         // When onStop() releases the binding (e.g. screen off, app backgrounded), Media3's
-        // MediaNotificationManager tries to call startForegroundService() to keep the service
-        // alive — but this is blocked on Android 12+ when the app is in the background,
-        // causing ForegroundServiceStartNotAllowedException. Starting the service explicitly
-        // here ensures it persists independently of binding state, so Media3 never needs to
-        // re-start it from a background context.
-        startService(Intent(this, MusicService::class.java))
+        // MediaNotificationManager tries to keep the service alive, but this is blocked on
+        // Android 12+ when the app is in the background. Using startForegroundService() ensures
+        // the service persists independently of binding state on all Android versions, including
+        // Android 16+ where startService() from background contexts is not allowed.
+        ContextCompat.startForegroundService(this, Intent(this, MusicService::class.java))
         
         // Bind to service - if already bound, this is a no-op but ensures we stay connected
         if (!isServiceBound) {
@@ -629,7 +628,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val homeViewModel: HomeViewModel = hiltViewModel()
-                val accountImageUrl by homeViewModel.accountImageUrl.collectAsState()
+                val accountImageUrl by homeViewModel.accountImageUrl.collectAsStateWithLifecycle()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val (previousTab, setPreviousTab) = rememberSaveable { mutableStateOf("home") }
 
@@ -893,7 +892,7 @@ class MainActivity : ComponentActivity() {
                 var showAccountDialog by remember { mutableStateOf(false) }
 
                 val pauseListenHistory by rememberPreference(PauseListenHistoryKey, defaultValue = false)
-                val eventCount by database.eventCount().collectAsState(initial = 0)
+                val eventCount by database.eventCount().collectAsStateWithLifecycle(initialValue = 0)
                 val showHistoryButton =
                     remember(pauseListenHistory, eventCount) {
                         !(pauseListenHistory && eventCount == 0)
