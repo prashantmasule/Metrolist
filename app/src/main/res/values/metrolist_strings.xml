@@ -4,6 +4,7 @@
     <string name="remote_history">Remote</string>
 
     <string name="charts">Charts</string>
+    <string name="mixes">Mixes</string>
     <string name="back_button_desc">Back</string>
     <string name="album_cover_desc">Album cover</string>
     <string name="top_music_videos">Top music videos</string>
@@ -26,6 +27,8 @@
     <string name="sync_playlist">Sync playlist</string>
     <string name="sync_disabled">Sync disabled</string>
     <string name="allows_for_sync_witch_youtube">NOTE: This option enables syncing with YouTube Music and CANNOT be changed later</string>
+
+    <string name="and">and</string>
     <string name="generating_image">Generating image…</string>
     <string name="please_wait">Please wait</string>
     <string name="cancel">Cancel</string>
@@ -149,6 +152,8 @@
     <string name="enable_song_cache">Enable song cache</string>
     <string name="enable_song_cache_desc">Automatically cache songs for faster future playback</string>
     <string name="show_uploaded_playlist">Show Uploaded playlist</string>
+    <string name="show_most_stats_playlists">Show Weekly and Monthly Most playlists</string>
+    <string name="show_most_stats_playlists_desc">Create and show stats-based Most playlists in Stats and Library</string>
     <string name="shuffle_playlist_first">Shuffle playlist or album first</string>
     <string name="shuffle_playlist_first_desc">When shuffling, play all songs from the current playlist or album before moving to similar content</string>
     <string name="prevent_duplicate_tracks_in_queue">Prevent duplicate tracks in queue</string>
@@ -192,9 +197,10 @@
     <string name="proxy_username">Proxy username</string>
     <string name="proxy_password">Proxy password</string>
     <string name="enable_authentication">Enable authentication</string>
-    <string name="discord_use_details">Use details instead of state</string>
-    <string name="discord_use_details_description">Show the song title prominently instead of the artist name</string>
 
+
+    <string name="auto_radio_queue">Auto radio queue</string>
+    <string name="auto_radio_queue_desc">Automatically create a radio queue when playing a song from search or home</string>
     <string name="enable_similar_content">Enable similar content</string>
     <string name="similar_content_desc">Automatically adds more similar songs when the end of the queue is reached</string>
     <string name="persistent_shuffle_title">Persistent shuffle</string>
@@ -259,6 +265,7 @@
     <string name="description">Description</string>
     <string name="views">Views</string>
     <string name="likes">Likes</string>
+
     <string name="dislikes">Dislikes</string>
     <string name="subscribe">Subscribe</string>
     <string name="subscribed">Subscribed</string>
@@ -390,6 +397,10 @@
     <string name="varispeed">Enable varispeed</string>
     <string name="varispeed_description">Link pitch to playback speed, resulting in tape-style speedup and slowdown effects</string>
 
+    <!-- AudioTrack Playback Parameters -->
+    <string name="audio_track_playback_params">Use hardware audio processing</string>
+    <string name="audio_track_playback_params_description">Use Android\'s AudioTrack for speed/pitch changes instead of software processing. More reliable for extreme pitch values</string>
+
     <!-- Google Cast -->
     <string name="google_cast">Google Cast</string>
     <string name="google_cast_description">Cast audio to Chromecast and other Cast-enabled devices</string>
@@ -491,7 +502,13 @@
     <string name="no_profiles">No equalizer profiles</string>
     <string name="import_profile">Import profile</string>
     <string name="system_equalizer">System equalizer</string>
+    <string name="system_equalizer_desc">Open Android\'s built-in equalizer</string>
     <string name="eq_disabled">Disabled</string>
+    <string name="eq_wizard">AutoEQ Wizard</string>
+    <string name="eq_download_db">Download AutoEQ database (17 MB)</string>
+    <string name="eq_downloading">Downloading…</string>
+    <string name="import_from_file">Import from file</string>
+    <string name="add_profile">Add profile</string>
     <plurals name="band_count">
         <item quantity="one">%d band</item>
         <item quantity="other">%d bands</item>
@@ -503,6 +520,17 @@
     <string name="import_error_title">Import error</string>
     <string name="error_title">Error</string>
     <string name="error_eq_apply_failed">Failed to apply equalizer profile: %1$s</string>
+
+    <!-- EQ Wizard -->
+    <string name="wizard_select_model">Select Model</string>
+    <string name="wizard_select_profiles">Select Profiles</string>
+    <string name="wizard_search_model_hint">Search for your headphone or earphone model</string>
+    <string name="wizard_model_name">Model Name</string>
+    <string name="wizard_model_placeholder">e.g., Sony WH-1000XM4, Bose QuietComfort 45</string>
+    <string name="wizard_no_models">No models found</string>
+    <string name="wizard_multiple_variants">Multiple variants available</string>
+    <string name="wizard_select_eq_profiles">Select EQ profiles for %s</string>
+    <string name="wizard_save_profiles">Save Profiles</string>
 
     <!-- Hardcoded strings -->
     <string name="found_in_settings_content">Found in Settings &gt; Content</string>
@@ -774,35 +802,54 @@
     <string name="recently_converted">Recently converted</string>
     <string name="column_label">Column %d</string>
 
-    <!-- Discord Integration -->
-    <string name="discord_status">Status</string>
-    <string name="discord_status_online">Online</string>
-    <string name="discord_status_idle">Idle</string>
-    <string name="discord_status_dnd">Do Not Disturb</string>
-    <string name="discord_buttons">Buttons</string>
-    <string name="discord_button_1">Button 1</string>
-    <string name="discord_button_2">Button 2</string>
-    <string name="login_successful">Login successful!</string>
-    <string name="discord_information_warning">This feature uses the KizzyRPC library to connect to Discord\'s Gateway and update your Rich Presence status. While no account suspensions from similar usage have been reported, this method is not officially supported by Discord and may be considered a Terms of Service violation. Your token is handled locally and never sent to third-party servers. Proceed at your own discretion!</string>
+    <string name="discord_connect_description">Sign in with Discord to share what you\'re listening to</string>
+    <string name="discord_information_warning">Metrolist uses Discord\'s public OAuth2 and Gateway APIs to share what you\'re listening to. Authorization happens through a local browser session that closes itself after capturing the code — nothing is sent to third-party servers. Your token is stored on this device in encrypted preferences and is never shared. Metrolist connects directly to wss://gateway.discord.gg to publish your activity, and only requests the minimum scope required (sdk.social_layer_presence).</string>
+    <string name="discord_status_connecting">Connecting to Discord…</string>
+    <string name="discord_status_reconnecting">Reconnecting to Discord…</string>
+    <string name="discord_status_connected">Connected</string>
+    <string name="discord_status_authorizing">Authorizing…</string>
+    <string name="discord_status_authorized">Authorized</string>
+    <string name="discord_status_not_initialized">Not initialized</string>
+    <string name="discord_error_loopback_timeout">Discord didn\'t respond in time. Please try again.</string>
+    <string name="discord_error_loopback_unbound">Couldn\'t open a local callback port. Please free one and try again.</string>
+    <string name="discord_error_no_browser">No browser was found to complete Discord authorization.</string>
+    <string name="discord_error_token_refresh_failed">Discord session expired. Please reconnect.</string>
+    <string name="discord_error_invalid_scope">Discord rejected the connection. Please reconnect and grant the required permission.</string>
+    <string name="discord_error_banner_title">Discord error</string>
+    <string name="discord_rpc_preview">Rich Presence preview</string>
+    <string name="discord_integration">Discord Integration</string>
+    <string name="enable_discord_rpc">Enable Rich Presence</string>
+    <string name="discord_advanced_mode">Advanced mode</string>
+    <string name="discord_advanced_mode_description">Customize every field of your Rich Presence with placeholders</string>
+    <string name="discord_presence">Presence</string>
     <string name="discord_activity_type">Activity type</string>
     <string name="discord_activity_playing">Playing</string>
     <string name="discord_activity_listening">Listening</string>
     <string name="discord_activity_watching">Watching</string>
     <string name="discord_activity_competing">Competing</string>
-    <string name="discord_button_text_variables">Variables: {song_name}, {artist_name}, {album_name}</string>
-    <string name="discord_rpc_preview">Rich Presence preview</string>
-    <string name="discord_presence">Presence</string>
-    <string name="discord_connect_description">Sign in with Discord to share what you\'re listening to</string>
-    <string name="discord_playing_metrolist">Playing Metrolist</string>
-    <string name="discord_watching_metrolist">Watching Metrolist</string>
-    <string name="discord_competing_metrolist">Competing in Metrolist</string>
     <string name="discord_activity_name">Activity name</string>
-    <string name="discord_activity_name_description">Custom name for the activity. Leave empty to use the default</string>
-    <string name="discord_advanced_mode">Advanced mode</string>
-    <string name="discord_advanced_mode_description">Show additional Rich Presence customization options</string>
+    <string name="discord_state">State</string>
+    <string name="discord_details">Details</string>
+    <string name="discord_buttons">Buttons</string>
+    <string name="discord_button_1">Button 1</string>
+    <string name="discord_button_2">Button 2</string>
+    <string name="discord_enable_button_1">Show button 1</string>
+    <string name="discord_enable_button_2">Show button 2</string>
+    <string name="discord_button_label">Label</string>
+    <string name="discord_button_url">URL</string>
+    <string name="discord_status">Status</string>
+    <string name="discord_status_online">Online</string>
+    <string name="discord_status_idle">Idle</string>
+    <string name="discord_status_dnd">Do Not Disturb</string>
+    <string name="discord_placeholders">Available placeholders</string>
+    <string name="discord_placeholder_song">Song name</string>
+    <string name="discord_placeholder_artist">Artist name</string>
+    <string name="discord_placeholder_album">Album name</string>
     <string name="speed_dial">Speed dial</string>
     <string name="pin_to_speed_dial">Pin to speed dial</string>
     <string name="unpin_from_speed_dial">Unpin from speed dial</string>
+    <string name="pin">Pin</string>
+    <string name="unpin">Unpin</string>
     <string name="randomize_home_order">Randomize home screen order</string>
     <string name="randomize_home_order_desc">Randomly reorder home screen sections using weighted priorities</string>
 
@@ -874,6 +921,7 @@
     <string name="restore_confirm_message">This will restore your app data from the selected backup</string>
     <string name="restore_account_warning">You will need to log in again after restoring. The following account will be signed out:</string>
     <string name="restore">Restore</string>
+    <string name="restore_database_incompatible">Cannot restore backup: database version incompatible. Your current data has been preserved.</string>
     <string name="checking_previous_account">Checking for previous account…</string>
     <string name="no_account_found">No account found</string>
 
@@ -918,7 +966,6 @@
     <string name="song_dropdown_more_results">Keep typing to narrow results (%d more)</string>
 
     <!-- Player and Audio Settings -->
-    <string name="audio_quality_very_high">Highest possible</string>
     <string name="autoplay">Autoplay</string>
     <string name="autoplay_desc">Automatically play the next song when the current one ends</string>
 
@@ -929,4 +976,39 @@
     <string name="switch_to_list_view">Switch to list view</string>
     <string name="switch_to_grid_view">Switch to grid view</string>
     <string name="more_options">More options</string>
+
+    <!-- Loudness Level -->
+    <string name="loudness_level">Loudness level</string>
+    <string name="loudness_level_aggressive">Aggressive (-7 dB)</string>
+    <string name="loudness_level_loud">Loud (-11 dB)</string>
+    <string name="loudness_level_balanced">Balanced (-14 dB)</string>
+    <string name="loudness_level_quiet">Quiet (-19 dB)</string>
+    <string name="widget_playlists">Playlists</string>
+    <string name="widget_playlists_description">Playlist shortcuts with mini-player controls</string>
+    <string name="choose_something_below">Choose something below</string>
+    <string name="stream_client">Stream client</string>
+    <string name="format_player_hash">Player hash</string>
+    <string name="format_cipher_support_added">Cipher support added</string>
+    <string name="not_applicable">N/A</string>
+
+    <!-- Stream sources -->
+    <string name="stream_sources">Stream sources</string>
+    <string name="stream_source_order">Stream order</string>
+    <string name="stream_source_web_clients">Web clients</string>
+    <string name="stream_source_native_clients">Native clients</string>
+    <string name="stream_source_creator_clients">Creator clients</string>
+    <string name="stream_source_web_remix">WEB_REMIX</string>
+    <string name="stream_source_web_remix_desc">Primary client. Authenticated; covers most tracks.</string>
+    <string name="stream_source_tvhtml5">TVHTML5</string>
+    <string name="stream_source_tvhtml5_desc">TV client. Reliable fallback.</string>
+    <string name="stream_source_visionos">visionOS</string>
+    <string name="stream_source_visionos_desc">Apple Vision. No throttle gate; very reliable.</string>
+    <string name="stream_source_android_vr">Android VR</string>
+    <string name="stream_source_android_vr_desc">Android VR clients (all versions).</string>
+    <string name="stream_source_ios">iOS / iPadOS</string>
+    <string name="stream_source_ios_desc">Apple iOS and iPadOS clients. Off by default; throttle-gated past ~1 MiB.</string>
+    <string name="stream_source_web_creator">WEB_CREATOR</string>
+    <string name="stream_source_web_creator_desc">Creator web client.</string>
+    <string name="stream_source_android_creator">ANDROID_CREATOR</string>
+    <string name="stream_source_android_creator_desc">Android creator client. Off by default; needs DroidGuard.</string>
 </resources>

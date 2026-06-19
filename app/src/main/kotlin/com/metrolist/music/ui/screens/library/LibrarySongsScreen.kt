@@ -6,6 +6,7 @@
 package com.metrolist.music.ui.screens.library
 
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -90,6 +91,7 @@ import com.metrolist.music.ui.utils.isScrollingUp
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.viewmodels.LibrarySongsViewModel
+import timber.log.Timber
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -146,6 +148,14 @@ fun LibrarySongsScreen(
             contract = ActivityResultContracts.OpenMultipleDocuments(),
         ) { uris: List<Uri> ->
             if (uris.isNotEmpty()) {
+                uris.forEach { uri ->
+                    try {
+                        val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+                    } catch (e: SecurityException) {
+                        Timber.w(e, "Could not take persistable permission")
+                    }
+                }
                 uploadJob =
                     scope.launch {
                         isUploading = true
@@ -158,7 +168,19 @@ fun LibrarySongsScreen(
                             uploadProgress = 0f
 
                             try {
-                                val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "unknown"
+                                // Get actual display name from content resolver
+                                var fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "unknown"
+                                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                                    if (cursor.moveToFirst()) {
+                                        val displayNameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                                        if (displayNameIndex >= 0) {
+                                            val name = cursor.getString(displayNameIndex)
+                                            if (!name.isNullOrBlank()) {
+                                                fileName = name
+                                            }
+                                        }
+                                    }
+                                }
                                 currentFileName = fileName
                                 val extension = fileName.substringAfterLast('.', "").lowercase()
 
@@ -437,7 +459,7 @@ fun LibrarySongsScreen(
 
             itemsIndexed(
                 items = filteredSongs,
-                key = { _, item -> item.song.id },
+                key = { index, item -> "${item.song.id}_$index" },
                 contentType = { _, _ -> CONTENT_TYPE_SONG },
             ) { index, song ->
                 SongListItem(
@@ -453,7 +475,6 @@ fun LibrarySongsScreen(
                                 menuState.show {
                                     SongMenu(
                                         originalSong = song,
-                                        navController = navController,
                                         onDismiss = menuState::dismiss,
                                     )
                                 }

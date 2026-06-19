@@ -371,7 +371,7 @@ fun YouTubePlaylistMenu(
                             modifier = Modifier.size(ListThumbnailSize),
                         ) {
                             AsyncImage(
-                                model = song.thumbnailUrl,
+                                model = song.thumbnailUrl?.resize(200, 200),
                                 contentDescription = null,
                                 modifier =
                                     Modifier
@@ -564,7 +564,7 @@ fun YouTubePlaylistMenu(
                         Material3MenuItemData(
                             title = {
                                 Text(
-                                    text = if (isPinned) "Unpin from Speed dial" else "Pin to Speed dial",
+                                    text = if (isPinned) stringResource(R.string.unpin_from_speed_dial) else stringResource(R.string.pin_to_speed_dial),
                                 )
                             },
                             icon = {

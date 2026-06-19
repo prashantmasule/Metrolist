@@ -66,6 +66,20 @@ data class MediaMetadata(
             isEpisode = isEpisode,
             uploadEntityId = uploadEntityId
         )
+
+    fun toYTItem() = SongItem(
+        id = id,
+        title = title,
+        artists = artists.map { com.metrolist.innertube.models.Artist(name = it.name, id = it.id) },
+        album = album?.let { com.metrolist.innertube.models.Album(name = it.title, id = it.id) },
+        duration = duration,
+        musicVideoType = musicVideoType,
+        thumbnail = thumbnailUrl ?: "",
+        explicit = explicit,
+        setVideoId = setVideoId,
+        isEpisode = isEpisode,
+        uploadEntityId = uploadEntityId
+    )
 }
 
 fun Song.toMediaMetadata() =
@@ -100,6 +114,10 @@ fun Song.toMediaMetadata() =
         isEpisode = song.isEpisode,
     )
 
+/**
+ * Converts an InnerTube [SongItem] into a [MediaMetadata] instance for use in the UI and player.
+ * Thumbnails are resized to 1080x1080 for high-quality display.
+ */
 fun SongItem.toMediaMetadata() =
     MediaMetadata(
         id = id,
@@ -112,7 +130,7 @@ fun SongItem.toMediaMetadata() =
             )
         },
         duration = duration ?: -1,
-        thumbnailUrl = thumbnail.resize(544, 544),
+        thumbnailUrl = thumbnail.resize(1080, 1080),
         album =
         album?.let {
             MediaMetadata.Album(
@@ -130,6 +148,10 @@ fun SongItem.toMediaMetadata() =
         uploadEntityId = uploadEntityId
     )
 
+/**
+ * Converts an InnerTube [EpisodeItem] into a [MediaMetadata] instance.
+ * The episode's podcast is mapped to [MediaMetadata.Album] and [MediaMetadata.isEpisode] is set.
+ */
 fun EpisodeItem.toMediaMetadata() =
     MediaMetadata(
         id = id,
@@ -141,7 +163,7 @@ fun EpisodeItem.toMediaMetadata() =
             )
         },
         duration = duration ?: -1,
-        thumbnailUrl = thumbnail.resize(544, 544),
+        thumbnailUrl = thumbnail.resize(1080, 1080),
         album = podcast?.let {
             MediaMetadata.Album(
                 id = it.id,

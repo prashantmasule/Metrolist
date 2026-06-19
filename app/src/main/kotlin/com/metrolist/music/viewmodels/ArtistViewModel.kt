@@ -22,6 +22,9 @@ import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.constants.HideYoutubeShortsKey
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.db.entities.ArtistEntity
+import com.metrolist.music.db.entities.deserializeArtistPage
+import com.metrolist.music.db.entities.serializeArtistPage
+import com.metrolist.music.db.entities.toArtistPage
 import com.metrolist.music.extensions.filterExplicit
 import com.metrolist.music.extensions.filterExplicitAlbums
 import com.metrolist.music.utils.SyncUtils
@@ -37,6 +40,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -86,8 +90,10 @@ class ArtistViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
-        // Load artist page and reload when hide explicit setting changes
         viewModelScope.launch {
+            // Load cached page first for instant display, then fetch fresh data
+            loadCachedPage()
+
             context.dataStore.data
                 .map {
                     Triple(
@@ -103,6 +109,30 @@ class ArtistViewModel @Inject constructor(
         }
     }
 
+    private suspend fun loadCachedPage() {
+        try {
+            val cachedJson = database.artist(artistId).firstOrNull()?.artist?.cachedPageJson
+            if (cachedJson != null) {
+                val cachedDto = deserializeArtistPage(cachedJson)
+                val page = cachedDto.toArtistPage()
+                val hideExplicit = context.dataStore.get(HideExplicitKey, false)
+                val hideVideoSongs = context.dataStore.get(HideVideoSongsKey, false)
+                val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
+
+                val filteredSections = page.sections
+                    .map { section ->
+                        section.copy(items = section.items.filterExplicit(hideExplicit).filterVideoSongs(hideVideoSongs).filterYoutubeShorts(hideYoutubeShorts))
+                    }
+                    .filter { section -> section.items.isNotEmpty() }
+
+                artistPage = page.copy(sections = filteredSections)
+                _apiSubscribed.value = page.isSubscribed
+            }
+        } catch (e: Exception) {
+            reportException(e)
+        }
+    }
+
     fun fetchArtistsFromYTM() {
         viewModelScope.launch {
             val hideExplicit = context.dataStore.get(HideExplicitKey, false)
@@ -110,15 +140,56 @@ class ArtistViewModel @Inject constructor(
             val hideYoutubeShorts = context.dataStore.get(HideYoutubeShortsKey, false)
             YouTube.artist(artistId)
                 .onSuccess { page ->
-                    val filteredSections = page.sections
+                    val resolvedSections = page.sections.map { section ->
+                        section.copy(items = YouTube.resolveArtistIds(section.items))
+                    }
+                    val resolvedPage = page.copy(sections = resolvedSections)
+                    val filteredSections = resolvedPage.sections
                         .map { section ->
                             section.copy(items = section.items.filterExplicit(hideExplicit).filterVideoSongs(hideVideoSongs).filterYoutubeShorts(hideYoutubeShorts))
                         }
                         .filter { section -> section.items.isNotEmpty() }
 
-                    artistPage = page.copy(sections = filteredSections)
+                    artistPage = resolvedPage.copy(sections = filteredSections)
+                    // Cache page data + persist artist metadata
+                    viewModelScope.launch(Dispatchers.IO) {
+                        try {
+                            val cachedJson = serializeArtistPage(
+                                sections = resolvedPage.sections,
+                                description = resolvedPage.description,
+                                subscriberCountText = resolvedPage.subscriberCountText,
+                                monthlyListenerCount = resolvedPage.monthlyListenerCount,
+                                isSubscribed = resolvedPage.isSubscribed,
+                                artist = resolvedPage.artist,
+                            )
+                            val existingArtist = database.artist(artistId).firstOrNull()?.artist
+                            if (existingArtist != null) {
+                                database.update(
+                                    existingArtist.copy(
+                                        name = resolvedPage.artist.title,
+                                        channelId = resolvedPage.artist.channelId ?: existingArtist.channelId,
+                                        thumbnailUrl = resolvedPage.artist.thumbnail ?: existingArtist.thumbnailUrl,
+                                        cachedPageJson = cachedJson,
+                                    )
+                                )
+                            } else {
+                                val apiArtist = resolvedPage.artist
+                                database.insert(
+                                    ArtistEntity(
+                                        id = artistId,
+                                        name = apiArtist.title,
+                                        channelId = apiArtist.channelId,
+                                        thumbnailUrl = apiArtist.thumbnail,
+                                        cachedPageJson = cachedJson,
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            reportException(e)
+                        }
+                    }
                     // Store API subscription state
-                    _apiSubscribed.value = page.isSubscribed
+                    _apiSubscribed.value = resolvedPage.isSubscribed
                 }.onFailure {
                     reportException(it)
                 }

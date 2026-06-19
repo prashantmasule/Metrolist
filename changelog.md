@@ -1,3 +1,124 @@
+---v13.5.0
+# MAINTENANCE MODE
+Metrolist is currently in maintenance mode. This means we will only be fixing bugs and making minor improvements. Please do not submit PRs for new features or major changes, as they will not be accepted.
+
+# Major changes
+- Rewrote the Discord RPC integration again (@adrielGGmotion @nyxiereal)
+- Fixed random playback issues and pauses (@DanielSchmerber @isotjs)
+- Fixed liked songs, playlists, albums, search results, etc. not displaying properly (@adrielGGmotion @nyxiereal)
+
+## Notable new features
+- Added a toggle for automatic radio queue generation (@FireLion137)
+- Added automatic tablet UI scaling (@kairosci)
+- Toggle from repeat(1) to repeat(all) after song change (@sunjeetkajla)
+
+## Other improvements
+- Fixe covers not loading sometimes (@Arjuanto)
+- Artist names are now split properly, and are now clickable (@kairosci)
+- Fixed multiple crashes (@kairosci @nyxiereal)
+- Improved audio normalization (@kairosci)
+- Fixed search results not being combined properly (@kairosci)
+- Fixed 'High quality' option not choosing the highest quality option (@kairosci)
+- Fixed history sync not working (@kairosci)
+
+## New Contributors
+- @DanielSchmerber made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3777
+- @Arjuanto made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3780
+
+---v13.4.3
+# MAINTENANCE MODE
+Metrolist is currently in maintenance mode. This means we will only be fixing bugs and making minor improvements. Please do not submit PRs for new features or major changes, as they will not be accepted.
+
+# Major changes
+- Rewrote the Discord RPC integration (@adrielGGmotion)
+- Improved the look of playlist screens (@adrielGGmotion)
+- Added a new playlist widget (@David-2765 @AntonioDionisio05)
+
+## Notable new features
+- Added proper apple music lyrics support (@adrielGGmotion)
+- Added a normalization level selector (@Jeff0945)
+- Added the ability to hide monthly/weekly most playlists (@isotjs)
+
+## Other improvements
+- Improve overall performance and stability (@adrielGGmotion @nyxiereal)
+- Fixed devnagari lyrics not being displayed properly (@cloud-zip)
+- Improve lyrics fetching speed (@nyxiereal)
+- Fixed crashes and some memory leaks (@nyxiereal)
+- Fixed images being low resolution for some users (@adrielGGmotion)
+- Handle playlist paging properly (@kairosci)
+- Multiple smaller improvements by @kairosci <3
+
+## New Contributors
+- @Jeff0945 made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3358
+
+---v13.4.2
+# MAINTENANCE MODE
+Metrolist is currently in maintenance mode. This means we will only be fixing bugs and making minor improvements. Please do not submit PRs for new features or major changes, as they will not be accepted.
+
+# Major changes
+- Fixed random crashes and some memory leaks (@nyxiereal)
+- Fixed issues with uploading songs to YouTube (@kairosci)
+- Fixed playback for uploaded songs (@punkscience)
+
+## Notable new features
+- EQ screen redesign and guided AutoEQ profile import (@ndellagrotte)
+- Automatically create database backups before updates (@nyxiereal)
+
+## Other improvements
+- Improved support for Android Auto (@cmeka)
+- Brought back the copy lyrics button for experimental lyrics (@nyxiereal)
+- Fixed the re-sync button for experimental lyrics (@nyxiereal)
+- Fixed listen together not working (@nyxiereal)
+- Added back support for choosing an account upon login (@nyxiereal)
+- Implemented concurrent fetching, fix lyrics fetch ordering, and optimize LyricsPlus server selection (@ibratabian17)
+- Corrected the play-next shuffle order (@johannesbrauer)
+- Improved the Android Auto icon (@ThatOneCalculator)
+
+## New Contributors
+- @ndellagrotte made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3487
+- @cmeka made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3534
+- @punkscience made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3517
+
+---v13.4.1
+# MAINTENANCE MODE
+Metrolist is currently in maintenance mode. This means we will only be fixing bugs and making minor improvements. Please do not submit PRs for new features or major changes, as they will not be accepted.
+
+# Major changes
+- Fixed cached songs showing up in the downloads playlist (@nyxiereal)
+- Fixed multiple playback issues and prepared for YouTube's player changes (@mostafaalagamy @nyxiereal)
+
+## Notable new features
+- Added the ability to paste URLs to the search to play them directly (@nyxiereal)
+- Added a search bar to the Library screen (@isotjs)
+- Added a setting to bind pitch and speed together (@sasha-melech)
+- Added support for Gemini voice playback (@FireLion137)
+- Added an option choose the highest possible audio quality (@nyxiereal @kairosci)
+- Added a button to create a playlist from the Library screen (@SunjeetKajla)
+
+## Other improvements
+- Moved the resync button to the lyrics menu (@nyxiereal)
+- Properly reset player on IO errors (@kairosci)
+- Multiple improvements to lyrics fetching and parsing (@kairosci @nyxiereal @ibratabian17)
+- Made autoplay disablable from the settings (@kairosci)
+- Fixed foreground/background service crashes (@kairosci)
+- Fixed Play next not working (@johannesbrauer)
+- Properly handle database updates on download removal (@kairosci)
+- Use lyricsplus caching to lower server load (@binimum)
+- Performance optimizations (@stopper2408)
+- Prefetch lyrics for the next song if currently viewing lyrics (@nyxiereal)
+- Fixed multiple issues with Listen Together (@nyxiereal)
+- Fixed multiple issues with the experimental lyrics (@nyxiereal)
+- Fixed pause music on task clear not working (@nyxiereal)
+
+## New Contributors
+* @ibratabian17 made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3474
+* @sasha-melech made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3301
+* @FireLion137 made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3500
+* @binimum made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3493
+* @stopper2408 made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3506
+* @SunjeetKajla made their first contribution in https://github.com/MetrolistGroup/Metrolist/pull/3505
+
+**Full Changelog**: https://github.com/MetrolistGroup/Metrolist/compare/v13.4.0...v13.4.1
 ---v13.4.0
 # MAINTENANCE MODE
 Metrolist is currently in maintenance mode. This means we will only be fixing bugs and making minor improvements. Please do not submit PRs for new features or major changes, as they will not be accepted.

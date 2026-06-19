@@ -21,6 +21,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableLongState
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -98,6 +101,7 @@ import com.metrolist.music.playback.CastConnectionHandler
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.ui.screens.settings.DarkMode
 import com.metrolist.music.ui.utils.resize
+import com.metrolist.music.utils.joinToArtistString
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
 import kotlinx.coroutines.launch
@@ -142,6 +146,7 @@ fun MiniPlayer(
     positionState: MutableLongState,
     durationState: MutableLongState,
     modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
 ) {
     val useNewMiniPlayerDesign by rememberPreference(UseNewMiniPlayerDesignKey, true)
 
@@ -152,12 +157,14 @@ fun MiniPlayer(
         NewMiniPlayer(
             progressState = progressState,
             modifier = modifier,
+            onClick = onClick,
         )
     } else {
         Box(modifier = modifier.fillMaxWidth()) {
             LegacyMiniPlayer(
                 progressState = progressState,
                 modifier = Modifier.align(Alignment.Center),
+                onClick = onClick,
             )
         }
     }
@@ -171,6 +178,7 @@ fun MiniPlayer(
 private fun NewMiniPlayer(
     progressState: ProgressState,
     modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
 ) {
     val playerConnection = LocalPlayerConnection.current ?: return
     val menuState = LocalMenuState.current
@@ -190,8 +198,8 @@ private fun NewMiniPlayer(
         }
 
     // Player states - only collect what's needed at this level
-    val playbackState by playerConnection.playbackState.collectAsStateWithLifecycle()
-    val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
+    val playbackState by playerConnection.playbackState.collectAsState()
+    val mediaMetadata by playerConnection.mediaMetadata.collectAsState()
     val canSkipNext by playerConnection.canSkipNext.collectAsStateWithLifecycle()
     val canSkipPrevious by playerConnection.canSkipPrevious.collectAsStateWithLifecycle()
 
@@ -367,6 +375,7 @@ private fun NewMiniPlayer(
                     }
                 },
     ) {
+        val interactionSource = remember { MutableInteractionSource() }
         Box(
             modifier =
                 Modifier
@@ -375,7 +384,12 @@ private fun NewMiniPlayer(
                     .offset { IntOffset(offsetXAnimatable.value.roundToInt(), 0) }
                     .clip(RoundedCornerShape(32.dp))
                     .background(color = backgroundColor)
-                    .border(1.dp, outlineColor.copy(alpha = 0.3f), RoundedCornerShape(32.dp)),
+                    .border(1.dp, outlineColor.copy(alpha = 0.3f), RoundedCornerShape(32.dp))
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = LocalIndication.current,
+                        onClick = onClick
+                    ),
         ) {
             when (miniPlayerBackground) {
                 MiniPlayerBackgroundStyle.BLUR -> {
@@ -515,8 +529,8 @@ private fun NewMiniPlayerPlayButton(
     outlineColor: Color,
     listenTogetherManager: ListenTogetherManager?,
 ) {
-    val isPlaying by playerConnection.isPlaying.collectAsStateWithLifecycle()
-    val castIsPlaying by castHandler?.castIsPlaying?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
+    val isPlaying by playerConnection.isPlaying.collectAsState()
+    val castIsPlaying by castHandler?.castIsPlaying?.collectAsState() ?: remember { mutableStateOf(false) }
     val effectiveIsPlaying = if (isCasting) castIsPlaying else isPlaying
     val isListenTogetherGuest = listenTogetherManager?.let { it.isInRoom && !it.isHost } ?: false
     val isMuted by playerConnection.isMuted.collectAsStateWithLifecycle()
@@ -637,7 +651,7 @@ private fun NewMiniPlayerSongInfo(
     errorColor: Color,
     modifier: Modifier = Modifier,
 ) {
-    val error by LocalPlayerConnection.current?.error?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val error by LocalPlayerConnection.current?.error?.collectAsState() ?: remember { mutableStateOf(null) }
 
     Column(
         modifier = modifier,
@@ -658,10 +672,10 @@ private fun NewMiniPlayerSongInfo(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (metadata.explicit) MIcon.Explicit()
-                if (metadata.artists.any { it.name.isNotBlank() }) {
-                    Text(
-                        text = metadata.artists.joinToString { it.name },
-                        color = onSurfaceColor.copy(alpha = 0.7f),
+                 if (metadata.artists.any { it.name.isNotBlank() }) {
+                     Text(
+                         text = metadata.artists.joinToArtistString(" ${stringResource(R.string.and)} ") { it.name },
+                         color = onSurfaceColor.copy(alpha = 0.7f),
                         fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Clip,
@@ -691,12 +705,13 @@ private fun NewMiniPlayerSongInfo(
 private fun LegacyMiniPlayer(
     progressState: ProgressState,
     modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
 ) {
     val playerConnection = LocalPlayerConnection.current ?: return
     val pureBlack by rememberPreference(PureBlackMiniPlayerKey, defaultValue = false)
 
-    val playbackState by playerConnection.playbackState.collectAsStateWithLifecycle()
-    val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
+    val playbackState by playerConnection.playbackState.collectAsState()
+    val mediaMetadata by playerConnection.mediaMetadata.collectAsState()
     val canSkipNext by playerConnection.canSkipNext.collectAsStateWithLifecycle()
     val canSkipPrevious by playerConnection.canSkipPrevious.collectAsStateWithLifecycle()
 
@@ -746,6 +761,8 @@ private fun LegacyMiniPlayer(
     val primaryColor = MaterialTheme.colorScheme.primary
     val trackColor = MaterialTheme.colorScheme.surfaceVariant
 
+    val interactionSource = remember { MutableInteractionSource() }
+
     Box(
         modifier =
             modifier
@@ -759,6 +776,10 @@ private fun LegacyMiniPlayer(
                     } else {
                         MaterialTheme.colorScheme.surfaceContainer
                     },
+                ).clickable(
+                    interactionSource = interactionSource,
+                    indication = LocalIndication.current,
+                    onClick = onClick
                 ).let { baseModifier ->
                     if (swipeThumbnail) {
                         baseModifier.pointerInput(Unit) {
@@ -899,8 +920,8 @@ private fun LegacyPlayPauseButton(
     playerConnection: PlayerConnection,
     listenTogetherManager: ListenTogetherManager?,
 ) {
-    val isPlaying by playerConnection.isPlaying.collectAsStateWithLifecycle()
-    val castIsPlaying by castHandler?.castIsPlaying?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
+    val isPlaying by playerConnection.isPlaying.collectAsState()
+    val castIsPlaying by castHandler?.castIsPlaying?.collectAsState() ?: remember { mutableStateOf(false) }
     val effectiveIsPlaying = if (isCasting) castIsPlaying else isPlaying
     val isListenTogetherGuest = listenTogetherManager?.let { it.isInRoom && !it.isHost } ?: false
     val isMuted by playerConnection.isMuted.collectAsStateWithLifecycle()
@@ -942,7 +963,7 @@ private fun LegacyMiniMediaInfo(
     pureBlack: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val error by LocalPlayerConnection.current?.error?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val error by LocalPlayerConnection.current?.error?.collectAsState() ?: remember { mutableStateOf(null) }
     val cropAlbumArt by rememberPreference(CropAlbumArtKey, false)
 
     Row(
@@ -1012,10 +1033,10 @@ private fun LegacyMiniMediaInfo(
                 modifier = Modifier.basicMarquee(),
             )
 
-            if (mediaMetadata.artists.any { it.name.isNotBlank() }) {
-                Text(
-                    text = mediaMetadata.artists.joinToString { it.name },
-                    color = MaterialTheme.colorScheme.secondary,
+             if (mediaMetadata.artists.any { it.name.isNotBlank() }) {
+                 Text(
+                     text = mediaMetadata.artists.joinToArtistString(" ${stringResource(R.string.and)} ") { it.name },
+                     color = MaterialTheme.colorScheme.secondary,
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

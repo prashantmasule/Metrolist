@@ -110,12 +110,12 @@ val AudioQualityKey = stringPreferencesKey("audioQuality")
 
 enum class AudioQuality {
     AUTO,
-    HIGH,
     LOW,
-    VERY_HIGH,
+    HIGH,
 }
 
 val AudioOffload = booleanPreferencesKey("enableOffload")
+val AudioTrackPlaybackParamsKey = booleanPreferencesKey("audioTrackPlaybackParams")
 
 val VarispeedKey = booleanPreferencesKey("varispeed")
 
@@ -126,7 +126,20 @@ val ShuffleModeKey = booleanPreferencesKey("shuffleMode")
 val SkipSilenceKey = booleanPreferencesKey("skipSilence")
 val SkipSilenceInstantKey = booleanPreferencesKey("skipSilenceInstant")
 val AudioNormalizationKey = booleanPreferencesKey("audioNormalization")
+
+val LoudnessLevelKey = stringPreferencesKey("loudnessLevel")
+
+enum class LoudnessLevel(
+    val targetLufs: Float
+) {
+    AGGRESSIVE(-7f),
+    LOUD(-11f),
+    BALANCED(-14f),
+    QUIET(-19f),
+}
+
 val AutoLoadMoreKey = booleanPreferencesKey("autoLoadMore")
+val AutoRadioQueueKey = booleanPreferencesKey("autoRadioQueue")
 val DisableLoadMoreWhenRepeatAllKey = booleanPreferencesKey("disableLoadMoreWhenRepeatAll")
 val AutoDownloadOnLikeKey = booleanPreferencesKey("autoDownloadOnLike")
 val SimilarContent = booleanPreferencesKey("similarContent")
@@ -147,21 +160,33 @@ val PauseListenHistoryKey = booleanPreferencesKey("pauseListenHistory")
 val PauseSearchHistoryKey = booleanPreferencesKey("pauseSearchHistory")
 val DisableScreenshotKey = booleanPreferencesKey("disableScreenshot")
 
-val DiscordTokenKey = stringPreferencesKey("discordToken")
+// Stream sources — which innertube clients are used for stream resolution (Settings → Stream sources).
+val StreamSourceWebRemixKey = booleanPreferencesKey("streamSourceWebRemix")
+val StreamSourceTVHTML5Key = booleanPreferencesKey("streamSourceTVHTML5")
+val StreamSourceAndroidVRKey = booleanPreferencesKey("streamSourceAndroidVR")
+val StreamSourceVisionOSKey = booleanPreferencesKey("streamSourceVisionOS")
+val StreamSourceIOSKey = booleanPreferencesKey("streamSourceIOS")
+val StreamSourceWebCreatorKey = booleanPreferencesKey("streamSourceWebCreator")
+val StreamSourceAndroidCreatorKey = booleanPreferencesKey("streamSourceAndroidCreator")
+
+val EnableDiscordRPCKey = booleanPreferencesKey("discordRPCEnable")
 val DiscordInfoDismissedKey = booleanPreferencesKey("discordInfoDismissed")
 val DiscordUsernameKey = stringPreferencesKey("discordUsername")
 val DiscordNameKey = stringPreferencesKey("discordName")
-val EnableDiscordRPCKey = booleanPreferencesKey("discordRPCEnable")
-val DiscordUseDetailsKey = booleanPreferencesKey("discordUseDetails")
 val DiscordAvatarKey = stringPreferencesKey("discordAvatar")
-val DiscordStatusKey = stringPreferencesKey("discordStatus")
-val DiscordButton1TextKey = stringPreferencesKey("discordButton1Text")
-val DiscordButton1VisibleKey = booleanPreferencesKey("discordButton1Visible")
-val DiscordButton2TextKey = stringPreferencesKey("discordButton2Text")
-val DiscordButton2VisibleKey = booleanPreferencesKey("discordButton2Visible")
+
+val DiscordAdvancedModeKey = booleanPreferencesKey("discordAdvancedMode")
 val DiscordActivityTypeKey = stringPreferencesKey("discordActivityType")
 val DiscordActivityNameKey = stringPreferencesKey("discordActivityName")
-val DiscordAdvancedModeKey = booleanPreferencesKey("discordAdvancedMode")
+val DiscordStateTemplateKey = stringPreferencesKey("discordStateTemplate")
+val DiscordDetailsTemplateKey = stringPreferencesKey("discordDetailsTemplate")
+val DiscordButton1EnabledKey = booleanPreferencesKey("discordButton1Enabled")
+val DiscordButton1LabelKey = stringPreferencesKey("discordButton1Label")
+val DiscordButton1UrlKey = stringPreferencesKey("discordButton1Url")
+val DiscordButton2EnabledKey = booleanPreferencesKey("discordButton2Enabled")
+val DiscordButton2LabelKey = stringPreferencesKey("discordButton2Label")
+val DiscordButton2UrlKey = stringPreferencesKey("discordButton2Url")
+val DiscordUserStatusKey = stringPreferencesKey("discordUserStatus")
 
 // Google Cast
 val EnableGoogleCastKey = booleanPreferencesKey("enableGoogleCast")
@@ -227,6 +252,7 @@ val LastPlaylistSyncKey = longPreferencesKey("last_playlist_sync")
 val LastFullSyncKey = longPreferencesKey("last_full_sync")
 val LastWeeklyMostPlaylistSyncKey = longPreferencesKey("last_weekly_most_playlist_sync")
 val LastMonthlyMostPlaylistSyncKey = longPreferencesKey("last_monthly_most_playlist_sync")
+val ShowMostStatsPlaylistsKey = booleanPreferencesKey("show_most_stats_playlists")
 
 // Sync cooldown in seconds (30 minutes)
 const val SYNC_COOLDOWN = 30 * 60L
@@ -359,42 +385,34 @@ enum class MyTopFilter {
     YEAR,
     ;
 
-    fun toTimeMillis(): Long =
+    fun toLocalDateTime(): LocalDateTime =
         when (this) {
             DAY -> {
                 LocalDateTime
                     .now()
                     .minusDays(1)
-                    .toInstant(ZoneOffset.UTC)
-                    .toEpochMilli()
             }
 
             WEEK -> {
                 LocalDateTime
                     .now()
                     .minusWeeks(1)
-                    .toInstant(ZoneOffset.UTC)
-                    .toEpochMilli()
             }
 
             MONTH -> {
                 LocalDateTime
                     .now()
                     .minusMonths(1)
-                    .toInstant(ZoneOffset.UTC)
-                    .toEpochMilli()
             }
 
             YEAR -> {
                 LocalDateTime
                     .now()
                     .minusMonths(12)
-                    .toInstant(ZoneOffset.UTC)
-                    .toEpochMilli()
             }
 
             ALL_TIME -> {
-                0
+                LocalDateTime.of(1970, 1, 1, 0, 0)
             }
         }
 }
@@ -409,6 +427,7 @@ enum class PreferredLyricsProvider {
     KUGOU,
     BETTER_LYRICS,
     PAXSENIX,
+    LYRICSPLUS
 }
 
 enum class PlayerButtonsStyle {

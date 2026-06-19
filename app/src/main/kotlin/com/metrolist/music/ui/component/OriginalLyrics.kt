@@ -66,7 +66,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -74,6 +73,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -108,6 +108,7 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.palette.graphics.Palette
 import coil3.ImageLoader
 import coil3.request.ImageRequest
@@ -142,6 +143,7 @@ import com.metrolist.music.constants.TranslateLanguageKey
 import com.metrolist.music.constants.TranslateModeKey
 import com.metrolist.music.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
 import com.metrolist.music.lyrics.LyricsEntry
+import com.metrolist.music.lyrics.LyricsResyncHelper
 import com.metrolist.music.lyrics.LyricsTranslationHelper
 import com.metrolist.music.lyrics.LyricsUtils.findCurrentLineIndex
 import com.metrolist.music.lyrics.LyricsUtils.isBelarusian
@@ -161,6 +163,7 @@ import com.metrolist.music.lyrics.LyricsUtils.romanizeCyrillic
 import com.metrolist.music.lyrics.LyricsUtils.romanizeHindi
 import com.metrolist.music.lyrics.LyricsUtils.romanizeJapanese
 import com.metrolist.music.lyrics.LyricsUtils.romanizeKorean
+import com.metrolist.music.lyrics.lyricsTextLooksSynced
 import com.metrolist.music.ui.component.shimmer.ShimmerHost
 import com.metrolist.music.ui.component.shimmer.TextPlaceholder
 import com.metrolist.music.ui.screens.settings.DarkMode
@@ -172,6 +175,7 @@ import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -354,10 +358,7 @@ fun OriginalLyrics(
                 }
             }
         }
-    val isSynced =
-        remember(lyrics) {
-            !lyrics.isNullOrEmpty() && lyrics.startsWith("[")
-        }
+    val isSynced = remember(lyrics) { lyricsTextLooksSynced(lyrics) }
 
     // State for translation status
     val translationStatus by LyricsTranslationHelper.status.collectAsStateWithLifecycle()
@@ -482,7 +483,9 @@ fun OriginalLyrics(
     val selectedIndices = remember { mutableStateListOf<Int>() }
     var showMaxSelectionToast by remember { mutableStateOf(false) } // State for showing max selection toast
 
-    val isLyricsProviderShown = lyricsEntity?.provider != null && lyricsEntity?.provider != "Unknown" && lyricsEntity?.provider != "Manual" && !isSelectionModeActive
+    val isLyricsProviderShown =
+        lyricsEntity?.provider != null && lyricsEntity?.provider != "Unknown" && lyricsEntity?.provider != "Manual" &&
+            !isSelectionModeActive
 
     val lazyListState = rememberLazyListState()
 
@@ -577,6 +580,19 @@ fun OriginalLyrics(
         }
     }
 
+    fun resolveListScrollIndex(lineIndex: Int): Int? {
+        if (lineIndex < 0 || lines.isEmpty()) return null
+
+        val safeLineIndex = lineIndex.coerceAtMost(lines.lastIndex)
+        val listIndex = if (isLyricsProviderShown) safeLineIndex + 1 else safeLineIndex
+        val totalItems =
+            lazyListState.layoutInfo.totalItemsCount.takeIf { it > 0 }
+                ?: (lines.size + if (isLyricsProviderShown) 1 else 0)
+
+        if (totalItems <= 0) return null
+        return listIndex.coerceIn(0, totalItems - 1)
+    }
+
     /**
      * Smoothly scrolls the lyrics list to center the item at [targetIndex].
      *
@@ -588,10 +604,11 @@ fun OriginalLyrics(
         duration: Int = 1500,
     ) {
         if (isAnimating) return // Prevent multiple animations
+        val listTargetIndex = resolveListScrollIndex(targetIndex) ?: return
+
         isAnimating = true
         try {
-            val lookUpIndex = if (isLyricsProviderShown) targetIndex + 1 else targetIndex
-            val itemInfo = lazyListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == lookUpIndex }
+            val itemInfo = lazyListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == listTargetIndex }
             if (itemInfo != null) {
                 // Item is visible, animate directly to center without sudden jumps
                 val viewportHeight = lazyListState.layoutInfo.viewportEndOffset - lazyListState.layoutInfo.viewportStartOffset
@@ -606,12 +623,31 @@ fun OriginalLyrics(
                 }
             } else {
                 // Item is not visible, scroll to it first without animation, then it will be handled in next cycle
-                lazyListState.scrollToItem(targetIndex)
+                lazyListState.scrollToItem(listTargetIndex)
             }
         } finally {
             isAnimating = false
         }
     }
+
+    val latestShowLyrics by rememberUpdatedState(showLyrics)
+    val latestResyncLyrics by rememberUpdatedState(
+        newValue = {
+            scope.launch {
+                performSmoothPageScroll(currentLineIndex, 1500)
+            }
+            isAutoScrollEnabled = true
+        },
+    )
+
+    LaunchedEffect(Unit) {
+        LyricsResyncHelper.resyncTrigger.collect {
+            if (latestShowLyrics) {
+                latestResyncLyrics()
+            }
+        }
+    }
+
     LaunchedEffect(currentLineIndex, lastPreviewTime, initialScrollDone, isAutoScrollEnabled) {
         if (!isSynced) return@LaunchedEffect
         if (isAutoScrollEnabled) {
@@ -891,12 +927,15 @@ fun OriginalLyrics(
                                             playerConnection.seekTo((item.time - lyricsOffset).coerceAtLeast(0))
                                             // Smooth slow scroll when clicking on lyrics (3 seconds)
                                             scope.launch {
+                                                val listTargetIndex = resolveListScrollIndex(index) ?: return@launch
                                                 // First scroll to the clicked item without animation
-                                                lazyListState.scrollToItem(index = index)
+                                                lazyListState.scrollToItem(index = listTargetIndex)
 
                                                 // Then animate it to center position slowly
                                                 val itemInfo =
-                                                    lazyListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+                                                    lazyListState.layoutInfo.visibleItemsInfo.firstOrNull {
+                                                        it.index == listTargetIndex
+                                                    }
                                                 if (itemInfo != null) {
                                                     val viewportHeight =
                                                         lazyListState.layoutInfo.viewportEndOffset -
@@ -1685,22 +1724,18 @@ fun OriginalLyrics(
             // Removed the more button from bottom - it's now in the top header
         }
 
-        AnimatedVisibility(
-            visible = isSelectionModeActive,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp),
+            contentAlignment = Alignment.BottomCenter,
         ) {
             AnimatedVisibility(
                 visible = !isAutoScrollEnabled && isSynced && !isSelectionModeActive,
                 enter = slideInVertically { it } + fadeIn(),
                 exit = slideOutVertically { it } + fadeOut(),
             ) {
-                FilledTonalButton(onClick = {
-                    scope.launch {
-                        performSmoothPageScroll(currentLineIndex, 1500)
-                    }
-                    isAutoScrollEnabled = true
-                }) {
+                FilledTonalButton(onClick = latestResyncLyrics) {
                     Icon(
                         painter = painterResource(id = R.drawable.sync),
                         contentDescription = stringResource(R.string.auto_scroll),

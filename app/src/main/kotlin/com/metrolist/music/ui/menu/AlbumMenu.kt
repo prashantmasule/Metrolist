@@ -64,8 +64,8 @@ import androidx.media3.exoplayer.offline.Download.STATE_QUEUED
 import androidx.media3.exoplayer.offline.Download.STATE_STOPPED
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
-import androidx.navigation.NavController
 import coil3.compose.AsyncImage
+import com.metrolist.music.LocalNavController
 import com.metrolist.innertube.YouTube
 import com.metrolist.music.LocalDatabase
 import com.metrolist.music.LocalDownloadUtil
@@ -99,9 +99,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun AlbumMenu(
     originalAlbum: Album,
-    navController: NavController,
     onDismiss: () -> Unit,
 ) {
+    val navController = LocalNavController.current
     val context = LocalContext.current
     val database = LocalDatabase.current
     val downloadUtil = LocalDownloadUtil.current
@@ -443,7 +443,7 @@ fun AlbumMenu(
                         Material3MenuItemData(
                             title = {
                                 Text(
-                                    text = if (isPinned) "Unpin from Speed dial" else "Pin to Speed dial",
+                                    text = if (isPinned) stringResource(R.string.unpin_from_speed_dial) else stringResource(R.string.pin_to_speed_dial),
                                 )
                             },
                             icon = {
@@ -463,6 +463,7 @@ fun AlbumMenu(
                                                 secondaryId = album.album.playlistId,
                                                 title = album.album.title,
                                                 subtitle = album.artists.joinToString(", ") { it.name },
+                                                subtitleIds = album.artists.joinToString(", ") { it.id },
                                                 thumbnailUrl = album.album.thumbnailUrl,
                                                 type = "ALBUM",
                                                 explicit = album.album.explicit,

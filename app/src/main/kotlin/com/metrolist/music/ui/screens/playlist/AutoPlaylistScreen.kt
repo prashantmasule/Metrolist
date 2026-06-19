@@ -6,6 +6,7 @@
 package com.metrolist.music.ui.screens.playlist
 
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -86,6 +87,7 @@ import androidx.compose.ui.util.fastForEachReversed
 import androidx.compose.ui.util.fastSumBy
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import timber.log.Timber
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
@@ -237,6 +239,14 @@ fun AutoPlaylistScreen(
             contract = ActivityResultContracts.OpenMultipleDocuments(),
         ) { uris: List<Uri> ->
             if (uris.isNotEmpty()) {
+                uris.forEach { uri ->
+                    try {
+                        val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+                    } catch (e: SecurityException) {
+                        Timber.w(e, "Could not take persistable permission")
+                    }
+                }
                 uploadJob =
                     scope.launch {
                         isUploading = true
@@ -249,7 +259,19 @@ fun AutoPlaylistScreen(
                             uploadProgress = 0f
 
                             try {
-                                val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "unknown"
+                                // Get actual display name from content resolver
+                                var fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "unknown"
+                                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                                    if (cursor.moveToFirst()) {
+                                        val displayNameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                                        if (displayNameIndex >= 0) {
+                                            val name = cursor.getString(displayNameIndex)
+                                            if (!name.isNullOrBlank()) {
+                                                fileName = name
+                                            }
+                                        }
+                                    }
+                                }
                                 currentFileName = fileName
                                 val extension = fileName.substringAfterLast('.', "").lowercase()
 
@@ -566,7 +588,7 @@ fun AutoPlaylistScreen(
                 if (filteredSongs.isNotEmpty()) {
                     itemsIndexed(
                         items = filteredSongs,
-                        key = { _, song -> song.id },
+                        key = { index, song -> "${song.id}_$index" },
                     ) { index, song ->
                         val onCheckedChange: (Boolean) -> Unit = {
                             if (it) {
@@ -593,7 +615,6 @@ fun AutoPlaylistScreen(
                                             menuState.show {
                                                 SongMenu(
                                                     originalSong = song,
-                                                    navController = navController,
                                                     onDismiss = menuState::dismiss,
                                                 )
                                             }
@@ -890,7 +911,7 @@ private fun AutoPlaylistHeader(
         // Playlist Name
         Text(
             text = name,
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             maxLines = 2,
@@ -906,7 +927,7 @@ private fun AutoPlaylistHeader(
                 buildString {
                     append(pluralStringResource(R.plurals.n_song, songs.size, songs.size))
                     if (likeLength > 0) {
-                        append(" • ")
+                        append(" ")
                         append(makeTimeString(likeLength * 1000L))
                     }
                 },

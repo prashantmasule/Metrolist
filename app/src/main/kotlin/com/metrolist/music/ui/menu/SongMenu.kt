@@ -65,8 +65,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
-import androidx.navigation.NavController
 import coil3.compose.AsyncImage
+import com.metrolist.music.LocalNavController
 import com.metrolist.innertube.YouTube
 import com.metrolist.music.LocalDatabase
 import com.metrolist.music.LocalDownloadUtil
@@ -108,12 +108,12 @@ import java.time.LocalDateTime
 fun SongMenu(
     originalSong: Song,
     event: Event? = null,
-    navController: NavController,
     playlistSong: PlaylistSong? = null,
     playlistBrowseId: String? = null,
     onDismiss: () -> Unit,
     isFromCache: Boolean = false,
 ) {
+    val navController = LocalNavController.current
     val context = LocalContext.current
     val database = LocalDatabase.current
     val playerConnection = LocalPlayerConnection.current ?: return
@@ -561,6 +561,7 @@ fun SongMenu(
                         ),
                     ),
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
+                columns = if (isGuest) 2 else 3,
             )
         }
         item {
@@ -662,7 +663,7 @@ fun SongMenu(
                             Material3MenuItemData(
                                 title = {
                                     Text(
-                                        text = if (isPinned) "Unpin from Speed dial" else "Pin to Speed dial",
+                                        text = if (isPinned) stringResource(R.string.unpin_from_speed_dial) else stringResource(R.string.pin_to_speed_dial),
                                     )
                                 },
                                 icon = {
@@ -681,9 +682,12 @@ fun SongMenu(
                                                     id = song.id,
                                                     title = song.song.title,
                                                     subtitle = song.artists.joinToString(", ") { it.name },
+                                                    subtitleIds = song.artists.joinToString(", ") { it.id },
                                                     thumbnailUrl = song.song.thumbnailUrl,
                                                     type = "SONG",
                                                     explicit = song.song.explicit,
+                                                    albumId = song.album?.id,
+                                                    albumName = song.album?.title
                                                 ),
                                             )
                                         }
@@ -824,7 +828,7 @@ fun SongMenu(
                                         )
                                     },
                                     onClick = {
-                                        playlistSong?.let { ps ->
+                                        playlistSong.let { ps ->
                                             val capturedSetVideoId = ps.map.setVideoId
                                             database.transaction {
                                                 move(
